@@ -45,25 +45,25 @@ export default function AnalyticsPage() {
             <>
               <StatsCard
                 title="Tổng tin đăng"
-                value={analytics?.total_listings.toLocaleString() || "0"}
+                value={analytics?.total_listings?.toLocaleString() || "0"}
                 description="Tất cả tin trong database"
                 icon={<Building className="h-4 w-4 text-muted-foreground" />}
               />
               <StatsCard
                 title="Tin đang hoạt động"
-                value={analytics?.active_listings.toLocaleString() || "0"}
+                value={analytics?.active_listings?.toLocaleString() || "0"}
                 description="Tin còn hiệu lực"
                 icon={<Activity className="h-4 w-4 text-muted-foreground" />}
               />
               <StatsCard
                 title="Lượt scrape 7 ngày"
-                value={analytics?.scrape_stats.total_scrapes || "0"}
-                description={`${analytics?.scrape_stats.total_new_listings || 0} tin mới`}
+                value={analytics?.scrape_stats?.total_scrapes || "0"}
+                description={`${analytics?.scrape_stats?.total_new_listings || 0} tin mới`}
                 icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
               />
               <StatsCard
                 title="Nguồn dữ liệu"
-                value={analytics?.platforms.length || "0"}
+                value={analytics?.platforms?.length || "0"}
                 description="Nền tảng được thu thập"
                 icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}
               />
@@ -100,25 +100,25 @@ export default function AnalyticsPage() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div className="text-center p-4 rounded-lg bg-muted/50">
                 <div className="text-2xl font-bold text-primary">
-                  {analytics.scrape_stats.total_scrapes}
+                  {analytics?.scrape_stats?.total_scrapes || 0}
                 </div>
                 <div className="text-sm text-muted-foreground">Tổng lượt scrape</div>
               </div>
               <div className="text-center p-4 rounded-lg bg-muted/50">
                 <div className="text-2xl font-bold text-green-600">
-                  {analytics.scrape_stats.successful_scrapes}
+                  {analytics?.scrape_stats?.successful_scrapes || 0}
                 </div>
                 <div className="text-sm text-muted-foreground">Thành công</div>
               </div>
               <div className="text-center p-4 rounded-lg bg-muted/50">
                 <div className="text-2xl font-bold text-blue-600">
-                  {analytics.scrape_stats.total_listings_found.toLocaleString()}
+                  {analytics?.scrape_stats?.total_listings_found?.toLocaleString() || 0}
                 </div>
                 <div className="text-sm text-muted-foreground">Tin tìm thấy</div>
               </div>
               <div className="text-center p-4 rounded-lg bg-muted/50">
                 <div className="text-2xl font-bold text-amber-600">
-                  {analytics.scrape_stats.avg_duration_seconds.toFixed(1)}s
+                  {(analytics?.scrape_stats?.avg_duration_seconds || 0).toFixed(1)}s
                 </div>
                 <div className="text-sm text-muted-foreground">Thời gian TB</div>
               </div>

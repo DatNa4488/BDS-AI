@@ -115,7 +115,7 @@ export default function ListingsPage() {
         )}
 
         {/* Listings Grid */}
-        {data && data.items.length > 0 && (
+        {data?.items && data.items.length > 0 && (
           <>
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {data.items.map((listing) => (
@@ -133,11 +133,11 @@ export default function ListingsPage() {
                 Trang trước
               </Button>
               <span className="px-4 text-sm text-muted-foreground">
-                Trang {page} / {data.pages}
+                Trang {page} / {data?.pages || 1}
               </span>
               <Button
                 variant="outline"
-                disabled={page >= data.pages}
+                disabled={page >= (data?.pages || 1)}
                 onClick={() => setPage(page + 1)}
               >
                 Trang sau
@@ -147,7 +147,7 @@ export default function ListingsPage() {
         )}
 
         {/* Empty */}
-        {data && data.items.length === 0 && (
+        {data?.items && data.items.length === 0 && (
           <div className="text-center py-12">
             <p className="text-muted-foreground">
               Không có tin đăng nào phù hợp với bộ lọc

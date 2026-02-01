@@ -205,7 +205,6 @@ async def notify_new_listings_job():
     """
     from storage.database import get_session, SavedSearchCRUD, ListingCRUD
     from storage.vector_db import semantic_search
-    from services.telegram_bot import send_notification
 
     logger.info("Starting notify_new_listings job...")
 
@@ -239,7 +238,8 @@ async def notify_new_listings_job():
                 if new_results:
                     # Send notification
                     try:
-                        await send_notification(
+                        from services.telegram_bot import send_search_alert
+                        await send_search_alert(
                             user_id=search.user_id,
                             search_name=search.name or search.query,
                             listings=new_results,

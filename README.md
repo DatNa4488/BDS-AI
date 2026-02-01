@@ -1,325 +1,192 @@
 # 🏠 BDS Agent - Hệ thống tìm kiếm & quản lý tin BĐS tự động
 
-Hệ thống AI Agent tự động thu thập, lưu trữ và tìm kiếm thông tin bất động sản từ nhiều nguồn.
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-v0.100+-green.svg)](https://fastapi.tiangolo.com/)
+[![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+Hệ thống AI Agent tự động thu thập, lưu trữ và tìm kiếm thông tin bất động sản từ nhiều nguồn với khả năng phân tích ngôn ngữ tự nhiên.
 
 ## ✨ Tính năng chính
 
-- **🤖 AI Agent thông minh**: Tự động tìm kiếm và thu thập dữ liệu từ nhiều nguồn
-- **🌐 Multi-source scraping**: Chợ Tốt, Batdongsan.com.vn, Mogi, Alonhadat, Facebook, Google
-- **✅ Data validation**: Kiểm tra số điện thoại, giá hợp lý, địa chỉ thực
-- **🔍 Semantic search**: Tìm kiếm ngữ nghĩa với ChromaDB
-- **📊 Database + Backup**: PostgreSQL + Google Sheets
-- **🔔 Notifications**: Telegram Bot alerts
-- **🎯 100% FREE stack**: Ollama local LLM, browser-use automation
+- **🤖 AI Agent thông minh**: Tự động tìm kiếm và thu thập dữ liệu từ nhiều nguồn sử dụng `browser-use`.
+- **🌐 Đa nền tảng**: Chợ Tốt, Batdongsan.com.vn, Mogi, Alonhadat, Facebook, Google.
+- **✅ Kiểm định dữ liệu**: Tự động kiểm tra số điện thoại, giá hợp lý theo vùng, và phát hiện tin rác/môi giới.
+- **🔍 Tìm kiếm ngữ nghĩa**: Tìm kiếm thông minh dựa trên ý nghĩa câu hỏi với ChromaDB.
+- **📊 Quản lý & Backup**: Lưu trữ PostgreSQL và tự động đồng bộ lên Google Sheets.
+- **🔔 Thông báo**: Cảnh báo tin mới ngay lập tức qua Telegram Bot.
+- **🎯 100% FREE stack**: Hỗ trợ Ollama (Local LLM), Groq, và Gemini.
 
 ## 🛠️ Tech Stack
 
-| Component          | Technology             |
-| ------------------ | ---------------------- |
-| LLM                | Ollama (qwen2.5:14b)   |
-| Browser Automation | browser-use            |
-| Backend            | FastAPI                |
-| Database           | PostgreSQL             |
-| Vector DB          | ChromaDB               |
-| Frontend           | Next.js 14 + Shadcn/UI |
-| Scheduler          | APScheduler            |
-| Backup             | Google Sheets API      |
-| Notifications      | Telegram Bot API       |
+| Thành phần | Công nghệ |
+| :--- | :--- |
+| **LLM** | Ollama (qwen2.5), Groq (Llama 3), Gemini 2.0 |
+| **Browser Automation** | browser-use (Playwright) |
+| **Backend** | FastAPI |
+| **Database** | PostgreSQL |
+| **Vector DB** | ChromaDB |
+| **Frontend** | Next.js 14 + Shadcn/UI + TailwindCSS |
+| **Migrations** | Alembic |
+| **Caching** | Redis |
+| **Notifications** | Telegram Bot API |
 
-## 📁 Project Structure
+## 📁 Cấu trúc thư mục (Project Structure)
 
 ```
-bds-agent/
-├── main.py                 # Entry point
-├── config.py               # Settings (Pydantic)
-├── docker-compose.yml      # PostgreSQL + Redis
+agent-bds/
+├── main.py                 # Điểm chạy ứng dụng chính (CLI)
+├── config.py               # Cấu hình hệ thống (Pydantic Settings)
+├── docker-compose.yml      # Cấu hình Docker (PostgreSQL, Redis, Adminer)
+├── Makefile                # Lệnh tắt cho phát triển (install, dev, migrate...)
 │
-├── agents/
-│   ├── search_agent.py     # Core AI agent
-│   ├── tools.py            # Custom tools
-│   └── prompts.py          # LLM prompts
+├── agents/                 # Logic của AI Agent
+│   ├── search_agent.py     # Agent tìm kiếm chính
+│   ├── tools.py            # Công cụ tùy chỉnh cho Agent
+│   └── prompts.py          # Tập hợp các mẫu câu lệnh AI
 │
-├── storage/
-│   ├── database.py         # SQLAlchemy models
-│   ├── vector_db.py        # ChromaDB wrapper
-│   └── sheets.py           # Google Sheets
+├── api/                    # Backend API (FastAPI)
+│   ├── main.py             # Khởi tạo API Server
+│   └── routes/             # Định nghĩa các đầu Endpoint (search, listings...)
 │
-├── services/
-│   ├── scraper.py          # Scraper orchestrator
-│   ├── validator.py        # Data validation
-│   └── matcher.py          # Buyer-seller matching
+├── services/               # Các dịch vụ bổ trợ
+│   ├── validator.py        # Kiểm định dữ liệu và giá
+│   └── telegram_bot.py     # Gửi thông báo qua Telegram
 │
-├── api/
-│   └── routes/             # FastAPI endpoints
+├── storage/                # Lưu trữ dữ liệu
+│   ├── database.py         # SQLAlchemy (PostgreSQL)
+│   ├── vector_db.py        # ChromaDB (Vector Search)
+│   └── sheets.py           # Google Sheets API
 │
-├── frontend/               # Next.js app
-│
-└── scheduler/
-    └── jobs.py             # Background jobs
+├── frontend/               # Giao diện người dùng (Next.js)
+├── alembic/                # Quản lý phiên bản cơ sở dữ liệu
+└── scheduler/              # Lập lịch chạy tự động (APScheduler)
 ```
 
-## 🚀 Quick Start
+## 🚀 Hướng Dẫn Cài Đặt (Quick Start)
 
-### 1. Prerequisites
+### 1. Yêu cầu hệ thống
+- **Python 3.11+**
+- **Docker & Docker Compose** (để chạy DB)
+- **Ollama** (để chạy AI model local)
+- **Node.js 18+** (cho giao diện web)
 
-- Python 3.11+
-- Docker & Docker Compose
-- Ollama installed locally
-- Node.js 18+ (for frontend)
-
-### 2. Install Ollama & Model
-
+### 2. Cài đặt Ollama & Model
 ```bash
-# Install Ollama (Windows)
-# Download from https://ollama.ai/download
-
-# Pull the model
-ollama pull qwen2.5:14b
-
-# Verify
-ollama list
+# 1. Tải Ollama tại https://ollama.ai/download
+# 2. Tải model khuyến nghị
+ollama pull qwen2.5:1.5b
 ```
 
-### 3. Setup Project
+### 3. Cài đặt dự án
+Sử dụng Makefile để cài đặt nhanh:
+```powershell
+# Cài đặt tất cả phụ thuộc (Python & Node.js)
+make install
 
-```bash
-# Clone repo
-cd bds-agent
-
-# Create virtual environment
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-# source .venv/bin/activate  # Linux/Mac
-
-# Install dependencies
+# Hoặc cài thủ công:
 pip install -r requirements.txt
-
-# Install browser-use playwright browsers
-python -m playwright install chromium
+playwright install chromium
 ```
 
-### 4. Configure Environment
-
-```bash
-# Copy example env
-copy .env.example .env  # Windows
-# cp .env.example .env  # Linux/Mac
-
-# Edit .env with your settings
+### 4. Cấu hình môi trường
+```powershell
+copy .env.example .env
+# Mở .env và điền các API Key nếu cần (Groq, Gemini, Telegram...)
 ```
 
-### 5. Start Database
-
-```bash
-# Start PostgreSQL & Redis
+### 5. Khởi động hệ thống
+```powershell
+# Chạy Database (PostgreSQL & Redis)
 docker-compose up -d
 
-# Verify
-docker-compose ps
+# Chạy Migrations để tạo bảng
+make migrate
+
+# Chạy Backend (API Server)
+make backend
+
+# Chạy Frontend (Web UI) - Mở terminal mới
+make frontend
 ```
 
-### 6. Run Agent
+## 📖 Ví dụ sử dụng
 
-```bash
-# Demo mode
+### Chế độ dòng lệnh (CLI)
+```powershell
+# Chạy demo tìm kiếm
 python main.py demo
 
-# Interactive mode
-python main.py interactive
-
-# Quick search
+# Tìm kiếm nhanh
 python main.py search "chung cư 2PN Cầu Giấy 2-3 tỷ"
-
-# Start API server
-python main.py api
-```
-
-## 📖 Usage Examples
-
-### Python API
-
-```python
-import asyncio
-from agents.search_agent import RealEstateSearchAgent
-
-async def main():
-    agent = RealEstateSearchAgent()
-
-    result = await agent.search(
-        "Tìm chung cư 2PN Cầu Giấy 2-3 tỷ",
-        max_results=10,
-        platforms=["chotot", "batdongsan"]
-    )
-
-    print(f"Found {result.total_found} listings")
-
-    for listing in result.listings:
-        print(f"- {listing['title']}")
-        print(f"  Price: {listing['price_text']}")
-        print(f"  URL: {listing['source_url']}")
-
-    await agent.close()
-
-asyncio.run(main())
 ```
 
 ### REST API
-
 ```bash
-# Search
-curl -X POST http://localhost:8000/api/search \
+# Tìm kiếm qua API
+curl -X POST http://localhost:8000/api/v1/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "chung cư 2PN Cầu Giấy 2-3 tỷ"}'
+  -d '{"query": "nhà riêng Ba Đình dưới 5 tỷ"}'
 
-# Get listings
-curl http://localhost:8000/api/listings
-
-# Get listing detail
-curl http://localhost:8000/api/listings/{id}
+# Lấy danh sách tin đã lưu
+curl http://localhost:8000/api/v1/listings
 ```
 
-## 🔧 Configuration
+## 🔧 Cấu hình (.env)
 
-### Environment Variables
+| Biến môi trường | Mô tả | Mặc định |
+| :--- | :--- | :--- |
+| `LLM_MODE` | Chế độ AI (ollama, groq, gemini) | `ollama` |
+| `OLLAMA_MODEL` | Tên model Ollama | `qwen2.5:1.5b` |
+| `DATABASE_URL` | Kết nối PostgreSQL | `postgresql+asyncpg://...` |
+| `HEADLESS_MODE` | Chạy trình duyệt ẩn | `true` |
+| `API_PORT` | Cổng chạy Backend | `8000` |
 
-| Variable           | Description                | Default                    |
-| ------------------ | -------------------------- | -------------------------- |
-| `OLLAMA_MODEL`     | Ollama model name          | `qwen2.5:14b`              |
-| `OLLAMA_BASE_URL`  | Ollama server URL          | `http://localhost:11434`   |
-| `DATABASE_URL`     | PostgreSQL connection      | `postgresql+asyncpg://...` |
-| `HEADLESS_MODE`    | Run browser headless       | `false`                    |
-| `SCRAPE_DELAY_MIN` | Min delay between requests | `2`                        |
-| `SCRAPE_DELAY_MAX` | Max delay between requests | `5`                        |
+## 🔒 Kiểm định dữ liệu (Data Validation)
 
-### Price Validation by District
+Hệ thống thực hiện quy trình kiểm tra nghiêm ngặt:
+1. **Trường bắt buộc**: Luôn có URL nguồn, tiêu đề và giá.
+2. **Số điện thoại**: Định dạng chuẩn VN, tự động làm sạch.
+3. **Giá theo khu vực**: Tự động validate giá m² dựa trên dữ liệu trung bình từng quận (ví dụ: Cầu Giấy 60-180tr/m²).
+4. **Chống trùng lặp**: Sử dụng Fingerprint (MD5) để tránh lưu tin trùng.
+5. **Lọc tin rác**: Loại bỏ các tin môi giới, ký gửi theo từ khóa.
 
-Giá được validate theo khoảng hợp lý cho từng quận (triệu VND/m²):
-
-| Quận      | Min | Max |
-| --------- | --- | --- |
-| Hoàn Kiếm | 100 | 300 |
-| Ba Đình   | 80  | 250 |
-| Tây Hồ    | 80  | 250 |
-| Cầu Giấy  | 60  | 180 |
-| Hà Đông   | 35  | 100 |
-| ...       | ... | ... |
-
-## 🔒 Data Validation
-
-Mỗi listing được validate:
-
-1. **Required fields**: `source_url`, `title`
-2. **Phone validation**: Format VN (0xxx-xxx-xxxx)
-3. **Price validation**: Trong khoảng hợp lý cho khu vực
-4. **Deduplication**: Hash(url + phone + title)
-5. **Spam detection**: Lọc tin môi giới, ký gửi
-
-## 📊 Listing Schema
-
+## 📊 Cấu trúc Listing (Schema)
+Dữ liệu được lưu trữ chuẩn hóa dưới dạng JSON:
 ```json
 {
-  "id": "md5_hash",
   "title": "Bán chung cư 2PN tại Cầu Giấy",
-  "price_text": "3 tỷ 500 triệu",
   "price_number": 3500000000,
   "area_m2": 85.5,
   "location": {
-    "address": "123 Đường ABC",
-    "ward": "Nghĩa Đô",
     "district": "Cầu Giấy",
     "city": "Hà Nội"
   },
   "contact": {
-    "name": "Anh Minh",
-    "phone": "0912 345 678",
     "phone_clean": "0912345678"
   },
-  "images": ["url1", "url2"],
   "source_url": "https://...",
-  "source_platform": "chotot",
-  "scraped_at": "2024-01-20T10:30:00Z",
-  "property_type": "chung cư",
-  "bedrooms": 2,
-  "bathrooms": 2
+  "property_type": "chung cư"
 }
 ```
 
-## 🧪 Testing
-
+## 🐳 Triển khai với Docker
 ```bash
-# Run tests
-pytest tests/ -v
+# Build & chạy toàn bộ dịch vụ
+make deploy
 
-# With coverage
-pytest tests/ --cov=. --cov-report=html
+# Xem logs
+make logs
 ```
 
-## 🐳 Docker Deployment
-
-```bash
-# Build & run all services
-docker-compose -f docker-compose.yml up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
-```
-
-## 📝 Development
-
-### Code Style
-
-```bash
-# Format
-black .
-
-# Lint
-ruff check .
-
-# Type check
-mypy .
-```
-
-### Adding New Platform
-
-1. Add platform config to `config.py`:
-
-```python
-SCRAPING_PLATFORMS["newplatform"] = {
-    "name": "New Platform",
-    "base_url": "https://...",
-    "priority": 7,
-}
-```
-
-2. Implement scraper in `agents/search_agent.py`:
-
-```python
-async def _search_newplatform(self, intent: SearchIntent) -> list[dict]:
-    # Implementation
-    pass
-```
-
-## ⚠️ Legal Notice
-
-- This tool is for educational purposes only
-- Respect robots.txt and terms of service
-- Use reasonable delays between requests
-- Do not overload target websites
+## ⚠️ Lưu ý pháp lý
+- Công cụ này chỉ dành cho mục đích học tập và nghiên cứu.
+- Hãy tuân thủ file `robots.txt` và điều khoản của các website nguồn.
+- Không thu thập dữ liệu với tần suất quá cao (sử dụng delay hợp lý).
 
 ## 📄 License
-
 MIT License
 
-## 🤝 Contributing
-
-1. Fork the repo
-2. Create feature branch
-3. Commit changes
-4. Open PR
-
 ---
-
-**Built with ❤️ using browser-use + Ollama**
+**Được xây dựng với ❤️ bởi cộng đồng AI Việt Nam**

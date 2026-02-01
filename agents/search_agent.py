@@ -14,6 +14,10 @@ from dataclasses import dataclass, field
 
 from browser_use import Agent, Browser
 from loguru import logger
+from bs4 import BeautifulSoup
+import re
+
+
 
 from config import settings
 
@@ -125,8 +129,11 @@ class RealEstateSearchAgent:
     Supports Groq API (fast, free) with Ollama fallback (local).
     """
 
-    def __init__(self):
+    def __init__(self, headless: bool = None):
         """Initialize the search agent with LLM and rate limiter."""
+        if headless is not None:
+            settings.headless_mode = headless
+            
         self.llm = self._init_llm()
         self.llm_type = "groq" if "Groq" in type(self.llm).__name__ else "ollama"
 
@@ -328,7 +335,7 @@ Lưu ý: 1 tỷ = 1000000000, 1 triệu = 1000000
         intent.keywords = [query]
         return intent
 
-    async def search(self, query: str, max_results: int = 20) -> SearchResult:
+    async def search(self, query: str, max_results: int = 20, platforms: List[str] = None) -> SearchResult:
         """
         MAIN SEARCH METHOD - Google-First Strategy
 
@@ -341,6 +348,7 @@ Lưu ý: 1 tỷ = 1000000000, 1 triệu = 1000000
         Args:
             query: Natural language search query
             max_results: Maximum results to return
+            platforms: List of platforms to search (e.g. ['chotot', 'batdongsan'])
 
         Returns:
             SearchResult with listings from multiple sources
@@ -368,6 +376,10 @@ Lưu ý: 1 tỷ = 1000000000, 1 triệu = 1000000
                     print(f"\n📍 STEP 2: Scraping {len(urls_to_scrape)} URLs")
 
                     for i, url_data in enumerate(urls_to_scrape):
+                        # Filter by platform if requested
+                        if platforms and url_data.get('platform') not in platforms:
+                            continue
+                            
                         print(f"\n--- URL {i+1}/{len(urls_to_scrape)} ---")
 
                         # Rate limit check
@@ -385,10 +397,10 @@ Lưu ý: 1 tỷ = 1000000000, 1 triệu = 1000000
                             await asyncio.sleep(delay)
                 else:
                     print("⚠️ No URLs found from Google, falling back to direct scrape")
-                    all_listings = await self._fallback_direct_scrape(intent, result)
+                    all_listings = await self._fallback_direct_scrape(intent, result, platforms)
             else:
                 # Direct scrape without Google search
-                all_listings = await self._fallback_direct_scrape(intent, result)
+                all_listings = await self._fallback_direct_scrape(intent, result, platforms)
 
             # STEP 3: Deduplicate
             print(f"\n📍 STEP 3: Deduplication")
@@ -688,34 +700,212 @@ NHIỆM VỤ: Extract BĐS listings từ {platform}
 CHỈ return JSON array với data THẬT từ page, không fake.
 """
 
-    async def _fallback_direct_scrape(self, intent: SearchIntent, result: SearchResult) -> List[Dict]:
-        """Fallback: scrape trực tiếp từ các trang chính."""
-        print("\n📍 Fallback: Direct platform scrape")
+    async def _fallback_direct_scrape(self, intent: SearchIntent, result: SearchResult, platforms_to_scrape: List[str] = None) -> List[Dict]:
+        """Fallback: scrape trực tiếp bằng Playwright (không dùng AI Agent để tránh lỗi timeout)."""
+        print("\n📍 Fallback: Direct platform scrape (Deterministic)")
 
         all_listings = []
-        platforms = ["batdongsan", "chotot"]
-
-        for platform in platforms:
-            logger.info(f"Searching platform: {platform}")
-            result.sources_searched.append(platform)
-
+        platforms = platforms_to_scrape or ["batdongsan", "chotot"]
+        
+        # Use simpler Playwright logic directly
+        from playwright.async_api import async_playwright
+        
+        async with async_playwright() as p:
+            # Launch browser
+            browser = await p.chromium.launch(
+                headless=settings.headless_mode,
+                args=["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage"]
+            )
+            context = await browser.new_context(
+                viewport={"width": 1280, "height": 800},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            
             try:
-                await self._rate_limit_wait()
-                res = await self._search_platform(platform, intent)
-                if isinstance(res, list):
-                    all_listings.extend(res)
-                    logger.info(f"Platform {platform}: found {len(res)} listings")
-            except Exception as e:
-                logger.error(f"Platform {platform} error: {e}")
-                result.errors.append(f"{platform}: {str(e)}")
+                for platform in platforms:
+                    logger.info(f"Searching platform: {platform}")
+                    result.sources_searched.append(platform)
 
-            # Delay between platforms
-            if platform != platforms[-1]:
-                delay = settings.delay_between_urls
-                logger.info(f"⏳ Waiting {delay}s for rate limit cooldown...")
-                await asyncio.sleep(delay)
+                    try:
+                        await self._rate_limit_wait()
+                        
+                        # Open new page for each platform
+                        page = await context.new_page()
+                        
+                        listings = []
+                        if platform == "chotot":
+                            listings = await self._scrape_chotot_direct(page, intent)
+                        elif platform == "batdongsan":
+                            listings = await self._scrape_batdongsan_direct(page, intent)
+                            
+                        if listings:
+                            all_listings.extend(listings)
+                            logger.info(f"Platform {platform}: found {len(listings)} listings")
+                        else:
+                            logger.warning(f"Platform {platform}: found 0 listings")
+                            
+                        await page.close()
+                        
+                    except Exception as e:
+                        logger.error(f"Platform {platform} error: {e}")
+                        result.errors.append(f"{platform}: {str(e)}")
+
+                    # Delay between platforms
+                    if platform != platforms[-1]:
+                        delay = settings.delay_between_urls
+                        logger.info(f"⏳ Waiting {delay}s for rate limit cooldown...")
+                        await asyncio.sleep(delay)
+                        
+            finally:
+                await browser.close()
 
         return all_listings
+
+    async def _scrape_chotot_direct(self, page, intent) -> List[Dict]:
+        """Scrape Chợ Tốt using robust BeautifulSoup parsing."""
+        query = f"{intent.property_type or 'bất động sản'} {intent.district or intent.city}"
+        encoded_query = query.replace(" ", "+")
+        url = f"https://nha.chotot.com/toan-quoc/mua-ban-bat-dong-san?q={encoded_query}"
+        
+        print(f"   🌐 Navigating to: {url}")
+        # Chotot uses Next.js, wait for network idle to ensure hydration
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        await page.wait_for_timeout(3000)
+        
+        html = await page.content()
+        soup = BeautifulSoup(html, 'lxml')
+        listings = []
+        
+        # Robust Strategy: Find all LI elements that likely contain a listing
+        # Chotot listings are usually in LI tags. We filter by checking for "tỷ" or "triệu" in text.
+        candidates = soup.find_all('li')
+        print(f"   Found {len(candidates)} list items, filtering...")
+
+        price_pattern = re.compile(r"(\d+(?:[.,]\d+)?)\s*(tỷ|triệu)", re.IGNORECASE)
+        area_pattern = re.compile(r"(\d+(?:[.,]\d+)?)\s*(m²|m2)", re.IGNORECASE)
+
+        for item in candidates:
+            text = item.get_text(" ", strip=True)
+            link_tag = item.find('a')
+            
+            # Simple heuristic: Must have price text and a link
+            if link_tag and price_pattern.search(text):
+                full_url = link_tag.get('href', '')
+                if full_url.startswith('/'):
+                    full_url = f"https://nha.chotot.com{full_url}"
+                
+                title = link_tag.get_text(" ", strip=True)
+                
+                # Extract Price
+                price_match = price_pattern.search(text)
+                price = price_match.group(0) if price_match else "Liên hệ"
+                
+                # Extract Area
+                area_match = area_pattern.search(text)
+                area = area_match.group(1) if area_match else ""  # Get number only
+                
+                # Location (heuristic: extract from text if possible, e.g. "Hà Nội", "Quận X")
+                address = "N/A"
+                if "Hà Nội" in text: address = "Hà Nội"
+                elif "Hồ Chí Minh" in text: address = "TP. Hồ Chí Minh"
+                
+                
+                # Extract Phone (simple regex for 09xx... or 03xx...)
+                phone_pattern = re.compile(r"(0\d{3}[\s.]?\d{3}[\s.]?\d{3}|0\d{2}[\s.]?\d{3}[\s.]?\d{3})")
+                phone_match = phone_pattern.search(text)
+                phone = phone_match.group(0) if phone_match else "Liên hệ"
+
+                location = {"address": address, "city": address} 
+
+                listings.append({
+                    "title": title,
+                    "price_text": price,
+                    "area_m2": area,
+                    "location": location,
+                    "contact": {"phone_clean": phone}, 
+                    "source_url": full_url,
+                    "source_platform": "chotot"
+                })
+                
+                if len(listings) >= 5: break
+        
+        print(f"   Extracted {len(listings)} listings from Chotot")
+        return listings
+
+    async def _scrape_batdongsan_direct(self, page, intent) -> List[Dict]:
+        """Scrape Batdongsan using robust BeautifulSoup parsing."""
+        query = f"{intent.property_type or 'nhà đất'} {intent.district or intent.city}"
+        url = "https://batdongsan.com.vn/ban-nha-dat"
+        if intent.city:
+             slug = "ha-noi" if "hà nội" in intent.city.lower() else "ho-chi-minh"
+             url = f"https://batdongsan.com.vn/ban-nha-dat-{slug}"
+             
+        print(f"   🌐 Navigating to: {url}")
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        await page.wait_for_timeout(3000)
+        
+        html = await page.content()
+        soup = BeautifulSoup(html, 'lxml')
+        listings = []
+        
+        # Robust Strategy: Identify 'product' or 'card' divs first, fallback to any div with Price pattern
+        candidates = soup.select("div[class*='product'], div[class*='card'], div[class*='item']")
+        if len(candidates) < 3:
+            # Fallback: Find divs that contain "tỷ" or "triệu" directly
+            print("   Structure unclear, using text search fallback...")
+            candidates = soup.find_all('div')
+        
+        print(f"   Scanning {len(candidates)} elements for listings...")
+        
+        price_pattern = re.compile(r"(\d+(?:[.,]\d+)?)\s*(tỷ|triệu)", re.IGNORECASE)
+        area_pattern = re.compile(r"(\d+(?:[.,]\d+)?)\s*(m²|m2)", re.IGNORECASE)
+        
+        seen_urls = set()
+
+        for item in candidates:
+            text = item.get_text(" ", strip=True)
+            link_tag = item.find('a')
+            
+            if link_tag and price_pattern.search(text):
+                full_url = link_tag.get('href', '')
+                if not full_url or full_url in seen_urls: continue
+                
+                if full_url.startswith('/'):
+                    full_url = f"https://batdongsan.com.vn{full_url}"
+                
+                seen_urls.add(full_url)
+                
+                # Check if it's a real listing (has price and area usually)
+                price_match = price_pattern.search(text)
+                area_match = area_pattern.search(text)
+                
+                if price_match:
+                    area_val = area_match.group(1) if area_match else ""
+                    
+                    # Heuristic location
+                    address = "N/A"
+                    if "Hà Nội" in text: address = "Hà Nội"
+                    elif "Hồ Chí Minh" in text: address = "TP. Hồ Chí Minh"
+                    
+                    # Extract Phone
+                    phone_pattern = re.compile(r"(0\d{3}[\s.]?\d{3}[\s.]?\d{3}|0\d{2}[\s.]?\d{3}[\s.]?\d{3})")
+                    phone_match = phone_pattern.search(text)
+                    phone = phone_match.group(0) if phone_match else "Liên hệ"
+
+                    listings.append({
+                        "title": link_tag.get_text(" ", strip=True) or (item.find('h3').get_text(strip=True) if item.find('h3') else "No Title"),
+                        "price_text": price_match.group(0),
+                        "area_m2": area_val,
+                        "location": {"address": address}, 
+                        "contact": {"phone_clean": phone},
+                        "source_url": full_url,
+                        "source_platform": "batdongsan"
+                    })
+                    
+                if len(listings) >= 5: break
+                
+        print(f"   Extracted {len(listings)} listings from Batdongsan")
+        return listings
 
     async def _rate_limit_wait(self):
         """Wait if approaching Groq rate limit."""
@@ -921,6 +1111,23 @@ Trả về JSON array:
         logger.info(f"Deduplicated: {len(listings)} -> {len(unique)} listings")
         return unique
 
+    async def close(self):
+        """Close any active resources."""
+        pass
+
+    async def search_with_progress(self, query: str, progress_callback=None, max_results: int = 20, platforms: List[str] = None) -> SearchResult:
+        """Search with simulated progress updates."""
+        if progress_callback:
+            await progress_callback({"percent": 10, "message": "Đang phân tích yêu cầu..."})
+        
+        # Call standard search
+        result = await self.search(query, max_results)
+        
+        if progress_callback:
+            await progress_callback({"percent": 100, "message": "Tìm kiếm hoàn tất!"})
+            
+        return result
+
     async def health_check(self) -> Dict:
         """Check LLM health and connection."""
         try:
@@ -964,3 +1171,12 @@ Trả về JSON array:
             "headless": settings.headless_mode,
             "vision_enabled": settings.browser_use_vision,
         }
+
+
+async def quick_search(query: str, max_results: int = 20) -> SearchResult:
+    """Helper function for quick one-off searches."""
+    agent = RealEstateSearchAgent()
+    try:
+        return await agent.search(query, max_results)
+    finally:
+        await agent.close()

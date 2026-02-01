@@ -8,13 +8,11 @@ from datetime import datetime
 from typing import List, Optional
 
 import httpx
-import structlog
+from loguru import logger
 
 from config import settings
 from storage.database import Listing
 
-
-logger = structlog.get_logger(__name__)
 
 
 class TelegramBot:
@@ -45,6 +43,7 @@ class TelegramBot:
         text: str,
         parse_mode: str = "HTML",
         disable_preview: bool = True,
+        chat_id: Optional[str] = None,
     ) -> bool:
         """
         Gửi tin nhắn đến Telegram.
@@ -66,7 +65,7 @@ class TelegramBot:
                 response = await client.post(
                     f"{self.base_url}/sendMessage",
                     json={
-                        "chat_id": self.chat_id,
+                        "chat_id": chat_id or self.chat_id,
                         "text": text,
                         "parse_mode": parse_mode,
                         "disable_web_page_preview": disable_preview,
@@ -77,15 +76,11 @@ class TelegramBot:
                     logger.info("Telegram message sent successfully")
                     return True
                 else:
-                    logger.error(
-                        "Telegram send failed",
-                        status=response.status_code,
-                        response=response.text,
-                    )
+                    logger.error(f"Telegram send failed: status={response.status_code}, response={response.text}")
                     return False
 
         except Exception as e:
-            logger.error("Telegram send error", error=str(e))
+            logger.error(f"Telegram send error: {e}")
             return False
 
     def format_listing_message(self, listing: Listing) -> str:
@@ -337,3 +332,37 @@ async def notify_new_listings(listings: List[Listing]) -> int:
     """Quick notify new listings."""
     bot = get_telegram_bot()
     return await bot.notify_new_listings(listings)
+
+
+async def send_search_alert(
+    user_id: int,
+    search_name: str,
+    listings: List[dict],
+) -> bool:
+    """
+    Send search alert to specific user.
+    Note: Requires user_id to be mapped to telegram_chat_id in database.
+    For now, we just log it as we don't have direct mapping yet.
+    """
+    # In a real app, we would look up User.telegram_id from user_id
+    # from storage.database import UserCRUD, get_session
+    # async with get_session() as session:
+    #     user = await UserCRUD.get_by_id(session, user_id)
+    #     chat_id = user.telegram_id if user else None
+    
+    # For now, send to default admin chat with user info
+    bot = get_telegram_bot()
+    
+    message = (
+        f"🔔 <b>ALERT FOR USER {user_id}</b>\n"
+        f"🔍 Search: {search_name}\n"
+        f"📊 Found {len(listings)} new listings\n\n"
+    )
+    
+    for i, l in enumerate(listings[:5]):
+        # Handle dict or Listing object
+        title = l.get('title') if isinstance(l, dict) else l.title
+        price = l.get('price_text') if isinstance(l, dict) else l.price_text
+        message += f"{i+1}. {title} ({price})\n"
+        
+    return await bot.send_message(message)

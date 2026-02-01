@@ -43,11 +43,10 @@ class VectorDB:
         self.embedding_model = embedding_model
 
         # Initialize ChromaDB client with persistence
-        self._client = chromadb.Client(ChromaSettings(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=str(self.persist_dir),
-            anonymized_telemetry=False,
-        ))
+        self._client = chromadb.PersistentClient(
+            path=str(self.persist_dir),
+            settings=ChromaSettings(anonymized_telemetry=False)
+        )
 
         # Use sentence-transformers for Vietnamese text
         # This model supports 50+ languages including Vietnamese

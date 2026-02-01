@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     redis_url: Optional[str] = None
 
     # LLM Configuration
-    llm_mode: str = "groq"  # groq, gemini, or ollama
+    llm_mode: str = "ollama"  # groq, gemini, or ollama
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
 
@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     # Ollama Fallback
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5:14b"
+    ollama_model: str = "qwen2.5:1.5b"
 
     # ChromaDB
     chroma_persist_dir: str = "./data/chroma"

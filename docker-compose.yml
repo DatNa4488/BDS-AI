@@ -15,7 +15,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -33,7 +33,7 @@ services:
       - redis_data:/data
     command: redis-server --appendonly yes
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -61,6 +61,11 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./credentials:/app/credentials
+      - ./api:/app/api
+      - ./agents:/app/agents
+      - ./storage:/app/storage
+      - ./scheduler:/app/scheduler
+      - ./config.py:/app/config.py
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,7 +109,6 @@ services:
       - bds_network
     profiles:
       - production
-
   # Ollama - Local LLM server (Optional)
   # ollama:
   #   image: ollama/ollama:latest
@@ -123,5 +127,4 @@ networks:
 
 volumes:
   postgres_data:
-  redis_data:
-  # ollama_data:
+  redis_data: # ollama_data:

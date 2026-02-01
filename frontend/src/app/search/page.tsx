@@ -26,13 +26,16 @@ function SearchContent() {
 
   const searchRequest: SearchRequest = {
     query,
-    district: filters.district,
-    property_type: filters.property_type,
-    price_min: filters.price_min ? parseInt(filters.price_min) : undefined,
-    price_max: filters.price_max ? parseInt(filters.price_max) : undefined,
-    area_min: filters.area_min ? parseInt(filters.area_min) : undefined,
-    area_max: filters.area_max ? parseInt(filters.area_max) : undefined,
-    limit: 50,
+    filters: {
+      district: filters.district,
+      property_type: filters.property_type,
+      min_price: filters.price_min ? parseInt(filters.price_min) : undefined,
+      max_price: filters.price_max ? parseInt(filters.price_max) : undefined,
+      min_area: filters.area_min ? parseInt(filters.area_min) : undefined,
+      max_area: filters.area_max ? parseInt(filters.area_max) : undefined,
+    },
+    max_results: 20,
+    search_realtime: true,
   };
 
   const { data, isLoading, isError, error } = useQuery({
@@ -98,7 +101,7 @@ function SearchContent() {
         )}
 
         {/* Empty State */}
-        {!isLoading && query && data?.listings.length === 0 && (
+        {!isLoading && query && data?.listings?.length === 0 && (
           <div className="text-center py-12">
             <p className="text-muted-foreground">
               Không tìm thấy kết quả phù hợp. Thử thay đổi từ khóa hoặc bộ lọc.
@@ -107,7 +110,7 @@ function SearchContent() {
         )}
 
         {/* Results Grid */}
-        {data && data.listings.length > 0 && (
+        {data?.listings && data.listings.length > 0 && (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {data.listings.map((listing) => (
               <ListingCard key={listing.id} listing={listing} />

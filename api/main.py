@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-import structlog
+from loguru import logger
 
 from api.routes import search, listings, analytics
 from storage.database import init_db, close_db, get_session
@@ -21,7 +21,8 @@ from config import settings
 
 
 # Configure logging
-logger = structlog.get_logger(__name__)
+
+
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
@@ -29,19 +30,14 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         logger.info(
-            "request_started",
-            method=request.method,
-            url=str(request.url),
-            client=request.client.host if request.client else "unknown",
+            f"request_started: method={request.method}, url={str(request.url)}, "
+            f"client={request.client.host if request.client else 'unknown'}"
         )
 
         response = await call_next(request)
 
         logger.info(
-            "request_completed",
-            method=request.method,
-            url=str(request.url),
-            status_code=response.status_code,
+            f"request_completed: method={request.method}, url={str(request.url)}, status_code={response.status_code}"
         )
 
         return response
@@ -68,7 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.vector_db = vector_db
         logger.info("✅ Vector database initialized")
     except Exception as e:
-        logger.error("⚠️ Vector DB init failed (continuing)", error=str(e))
+        logger.error(f"⚠️ Vector DB init failed: {e}")
         app.state.vector_db = None
 
     # Setup scheduler
@@ -127,7 +123,12 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173", 
+        "*"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -39,14 +39,19 @@ export interface Listing {
 
 export interface SearchRequest {
   query: string;
-  district?: string;
-  property_type?: string;
-  price_min?: number;
-  price_max?: number;
-  area_min?: number;
-  area_max?: number;
+  filters?: {
+    district?: string;
+    property_type?: string;
+    min_price?: number;
+    max_price?: number;
+    min_area?: number;
+    max_area?: number;
+    source_platform?: string;
+    bedrooms?: number;
+  };
+  max_results?: number;
   platforms?: string[];
-  limit?: number;
+  search_realtime?: boolean;
 }
 
 export interface SearchResponse {

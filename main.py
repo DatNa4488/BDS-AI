@@ -204,7 +204,7 @@ async def main():
             from api.main import app
 
             uvicorn.run(
-                app,
+                "api.main:app",
                 host=settings.api_host,
                 port=settings.api_port,
                 reload=settings.api_reload,
