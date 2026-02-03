@@ -1,17 +1,19 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useState, useEffect, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { Loader2, BarChart3 } from "lucide-react";
 import { Header, Footer } from "@/components/layout/header";
 import { SearchBox } from "@/components/search/search-box";
 import { FilterPanel } from "@/components/search/filter-panel";
 import { ListingCard, ListingCardSkeleton } from "@/components/listings/listing-card";
+import { Button } from "@/components/ui/button";
 import { searchListings, type SearchRequest } from "@/lib/api";
 
 function SearchContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const initialQuery = searchParams.get("q") || "";
 
   const [query, setQuery] = useState(initialQuery);
@@ -71,7 +73,7 @@ function SearchContent() {
           />
         </div>
 
-        {/* Results */}
+        {/* Results Header */}
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-semibold">
             {query ? `Kết quả tìm kiếm "${query}"` : "Nhập từ khóa để tìm kiếm"}
@@ -82,6 +84,8 @@ function SearchContent() {
             </span>
           )}
         </div>
+
+
 
         {/* Loading State */}
         {isLoading && (

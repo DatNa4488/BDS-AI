@@ -30,29 +30,30 @@ interface ListingCardProps {
 
 export function ListingCard({ listing, variant = "default" }: ListingCardProps) {
   const isCompact = variant === "compact";
+  // Cast to any to handle both Listing and SearchResultItem types
+  const item = listing as any;
 
   return (
     <Card className="h-full hover:shadow-lg transition-shadow">
       <CardHeader className={isCompact ? "pb-2" : "pb-3"}>
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <Link href={`/listings/${listing.id}`}>
+            <Link href={`/listings/${item.id}`}>
               <h3 className={`font-semibold hover:text-primary line-clamp-2 ${isCompact ? "text-sm" : "text-base"}`}>
-                {listing.title || "Không có tiêu đề"}
+                {item.title || "Không có tiêu đề"}
               </h3>
             </Link>
             <div className="flex items-center gap-1 text-muted-foreground mt-1">
               <MapPin className="h-3 w-3" />
               <span className="text-sm truncate">
-                {/* Handle both Listing (flat) and SearchResultItem (nested location) */}
-                {typeof listing.location === 'object' && listing.location !== null
-                  ? listing.location.district || listing.location.address || "Không xác định"
-                  : (listing as any).district || (listing as any).address || "Không xác định"}
+                {typeof item.location === 'object' && item.location !== null
+                  ? item.location.district || item.location.address || "Không xác định"
+                  : item.district || item.address || "Không xác định"}
               </span>
             </div>
           </div>
-          <Badge className={getPlatformColor(listing.source_platform)}>
-            {listing.source_platform || "N/A"}
+          <Badge className={getPlatformColor(item.source_platform)}>
+            {item.source_platform || "N/A"}
           </Badge>
         </div>
       </CardHeader>
@@ -61,28 +62,28 @@ export function ListingCard({ listing, variant = "default" }: ListingCardProps) 
         {/* Price */}
         <div className="mb-3">
           <div className="text-2xl font-bold text-primary">
-            {listing.price_text || formatPrice(listing.price_number)}
+            {(listing as any).price_text || formatPrice(item.price_number)}
           </div>
-          {/* Handle both price_per_m2 (Listing) and calculated from price/area (SearchResultItem) */}
-          {((listing as any).price_per_m2 || (listing.price_number && listing.area_m2 && listing.price_number / listing.area_m2)) && (
+          {/* Handle both price_per_m2 (item) and calculated from price/area (SearchResultItem) */}
+          {((listing as any).price_per_m2 || (item.price_number && item.area_m2 && item.price_number / item.area_m2)) && (
             <div className="text-sm text-muted-foreground">
-              {formatPricePerM2((listing as any).price_per_m2 || (listing.price_number! / listing.area_m2!))}
+              {formatPricePerM2((listing as any).price_per_m2 || (item.price_number! / item.area_m2!))}
             </div>
           )}
         </div>
 
         {/* Specs */}
         <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-          {listing.area_m2 && (
+          {item.area_m2 && (
             <div className="flex items-center gap-1">
               <Maximize className="h-4 w-4" />
-              <span>{formatArea(listing.area_m2)}</span>
+              <span>{formatArea(item.area_m2)}</span>
             </div>
           )}
-          {listing.bedrooms && (
+          {item.bedrooms && (
             <div className="flex items-center gap-1">
               <Bed className="h-4 w-4" />
-              <span>{listing.bedrooms} PN</span>
+              <span>{item.bedrooms} PN</span>
             </div>
           )}
           {(listing as any).bathrooms && (
@@ -96,7 +97,7 @@ export function ListingCard({ listing, variant = "default" }: ListingCardProps) 
         {/* Property type & Date */}
         <div className="flex items-center justify-between mt-3 text-sm">
           <Badge variant="secondary">
-            {getPropertyTypeLabel(listing.property_type)}
+            {getPropertyTypeLabel(item.property_type)}
           </Badge>
           <span className="text-muted-foreground">
             {formatRelativeDate((listing as any).scraped_at || new Date().toISOString())}
@@ -112,24 +113,24 @@ export function ListingCard({ listing, variant = "default" }: ListingCardProps) 
       </CardContent>
 
       <CardFooter className="pt-0 gap-2">
-        {/* Handle both contact_phone (Listing) and contact.phone (SearchResultItem) */}
-        {((listing as any).contact_phone || (typeof listing.contact === 'object' && listing.contact?.phone)) && (
+        {/* Handle both contact_phone (item) and contact.phone (SearchResultItem) */}
+        {((listing as any).contact_phone || (typeof (listing as any).contact === 'object' && (listing as any).contact?.phone)) && (
           <Button variant="outline" size="sm" className="flex-1" asChild>
-            <a href={`tel:${(listing as any).contact_phone || listing.contact?.phone}`}>
+            <a href={`tel:${(listing as any).contact_phone || (listing as any).contact?.phone}`}>
               <Phone className="h-4 w-4 mr-1" />
               Liên hệ
             </a>
           </Button>
         )}
-        {listing.source_url && (
+        {item.source_url && (
           <Button variant="outline" size="sm" asChild>
-            <a href={listing.source_url} target="_blank" rel="noopener noreferrer">
+            <a href={item.source_url} target="_blank" rel="noopener noreferrer">
               <ExternalLink className="h-4 w-4" />
             </a>
           </Button>
         )}
         <Button size="sm" asChild className="flex-1">
-          <Link href={`/listings/${listing.id}`}>Chi tiết</Link>
+          <Link href={`/listings/${item.id}`}>Chi tiết</Link>
         </Button>
       </CardFooter>
     </Card>

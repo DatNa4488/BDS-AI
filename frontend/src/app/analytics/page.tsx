@@ -12,15 +12,20 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAnalytics, getPriceTrends } from "@/lib/api";
 
+import { useSearchParams } from "next/navigation";
+
 export default function AnalyticsPage() {
+  const searchParams = useSearchParams();
+  const query = searchParams.get("query") || undefined;
+
   const { data: analytics, isLoading: analyticsLoading } = useQuery({
-    queryKey: ["analytics"],
-    queryFn: getAnalytics,
+    queryKey: ["analytics", query],
+    queryFn: () => getAnalytics(query),
   });
 
   const { data: trends } = useQuery({
-    queryKey: ["price-trends"],
-    queryFn: () => getPriceTrends({ days: 30 }),
+    queryKey: ["price-trends", query],
+    queryFn: () => getPriceTrends({ days: 30, district: query }), // Simple approximation for trends
   });
 
   return (
@@ -29,9 +34,13 @@ export default function AnalyticsPage() {
 
       <main className="flex-1 container py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold">Phân tích thị trường</h1>
+          <h1 className="text-3xl font-bold">
+            {query ? `Phân tích: "${query}"` : "Phân tích thị trường"}
+          </h1>
           <p className="text-muted-foreground mt-1">
-            Thống kê và xu hướng thị trường bất động sản Hà Nội
+            {query
+              ? `Thống kê từ các tin đăng phù hợp với từ khóa "${query}"`
+              : "Thống kê và xu hướng thị trường bất động sản Hà Nội"}
           </p>
         </div>
 

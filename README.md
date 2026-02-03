@@ -1,206 +1,147 @@
-# 🏠 BDS Agent - Hệ thống tìm kiếm & quản lý tin BĐS tự động
+# 🏠 BDS Agent - Hệ Thống Tìm Kiếm & Phân Tích Bất Động Sản AI
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-v0.100+-green.svg)](https://fastapi.tiangolo.com/)
-[![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+Hệ thống AI Agent tự động thu thập (scrape), lưu trữ và phân tích tin đăng bất động sản từ nhiều nguồn (Chợ Tốt, Batdongsan.com.vn) sử dụng `browser-use` và LLM (Ollama/Gemini).
 
-Hệ thống AI Agent tự động thu thập, lưu trữ và tìm kiếm thông tin bất động sản từ nhiều nguồn với khả năng phân tích ngôn ngữ tự nhiên.
+Được thiết kế để chạy trên môi trường **Windows** (hoặc Linux/Mac) với Docker cho Database.
 
-## ✨ Tính năng chính
+---
 
-- **🤖 AI Agent thông minh**: Tự động tìm kiếm và thu thập dữ liệu từ nhiều nguồn sử dụng `browser-use`.
-- **🌐 Đa nền tảng**: Chợ Tốt, Batdongsan.com.vn, Mogi, Alonhadat, Facebook, Google.
-- **✅ Kiểm định dữ liệu**: Tự động kiểm tra số điện thoại, giá hợp lý theo vùng, và phát hiện tin rác/môi giới.
-- **🔍 Tìm kiếm ngữ nghĩa**: Tìm kiếm thông minh dựa trên ý nghĩa câu hỏi với ChromaDB.
-- **📊 Quản lý & Backup**: Lưu trữ PostgreSQL và tự động đồng bộ lên Google Sheets.
-- **🔔 Thông báo**: Cảnh báo tin mới ngay lập tức qua Telegram Bot.
-- **🎯 100% FREE stack**: Hỗ trợ Ollama (Local LLM), Groq, và Gemini.
+## 📋 Yêu Cầu Hệ Thống (Prerequisites)
 
-## 🛠️ Tech Stack
+Để chạy được dự án này, bạn cần cài đặt các phần mềm sau:
 
-| Thành phần | Công nghệ |
-| :--- | :--- |
-| **LLM** | Ollama (qwen2.5), Groq (Llama 3), Gemini 2.0 |
-| **Browser Automation** | browser-use (Playwright) |
-| **Backend** | FastAPI |
-| **Database** | PostgreSQL |
-| **Vector DB** | ChromaDB |
-| **Frontend** | Next.js 14 + Shadcn/UI + TailwindCSS |
-| **Migrations** | Alembic |
-| **Caching** | Redis |
-| **Notifications** | Telegram Bot API |
+1.  **Python 3.11+**: [Tải tại đây](https://www.python.org/downloads/) (Nhớ tích chọn "Add Python to PATH").
+2.  **Node.js 18+**: [Tải tại đây](https://nodejs.org/en/download/) (Cho Frontend Next.js).
+3.  **Docker Desktop**: [Tải tại đây](https://www.docker.com/products/docker-desktop/) (Để chạy PostgreSQL & Redis).
+4.  **Ollama** (Tùy chọn nếu chạy Local LLM): [Tải tại đây](https://ollama.ai/).
 
-## 📁 Cấu trúc thư mục (Project Structure)
+---
 
-```
-agent-bds/
-├── main.py                 # Điểm chạy ứng dụng chính (CLI)
-├── config.py               # Cấu hình hệ thống (Pydantic Settings)
-├── docker-compose.yml      # Cấu hình Docker (PostgreSQL, Redis, Adminer)
-├── Makefile                # Lệnh tắt cho phát triển (install, dev, migrate...)
-│
-├── agents/                 # Logic của AI Agent
-│   ├── search_agent.py     # Agent tìm kiếm chính
-│   ├── tools.py            # Công cụ tùy chỉnh cho Agent
-│   └── prompts.py          # Tập hợp các mẫu câu lệnh AI
-│
-├── api/                    # Backend API (FastAPI)
-│   ├── main.py             # Khởi tạo API Server
-│   └── routes/             # Định nghĩa các đầu Endpoint (search, listings...)
-│
-├── services/               # Các dịch vụ bổ trợ
-│   ├── validator.py        # Kiểm định dữ liệu và giá
-│   └── telegram_bot.py     # Gửi thông báo qua Telegram
-│
-├── storage/                # Lưu trữ dữ liệu
-│   ├── database.py         # SQLAlchemy (PostgreSQL)
-│   ├── vector_db.py        # ChromaDB (Vector Search)
-│   └── sheets.py           # Google Sheets API
-│
-├── frontend/               # Giao diện người dùng (Next.js)
-├── alembic/                # Quản lý phiên bản cơ sở dữ liệu
-└── scheduler/              # Lập lịch chạy tự động (APScheduler)
-```
+## 🚀 Hướng Dẫn Cài Đặt (Setup Guide)
 
-## 🚀 Hướng Dẫn Cài Đặt (Quick Start)
+Làm theo từng bước dưới đây để thiết lập môi trường.
 
-### 1. Yêu cầu hệ thống
-- **Python 3.11+**
-- **Docker & Docker Compose** (để chạy DB)
-- **Ollama** (để chạy AI model local)
-- **Node.js 18+** (cho giao diện web)
+### Bước 1: Chuẩn bị Backend (Python)
 
-### 2. Cài đặt Ollama & Model
-```bash
-# 1. Tải Ollama tại https://ollama.ai/download
-# 2. Tải model khuyến nghị
-ollama pull qwen2.5:1.5b
-```
-
-### 3. Cài đặt dự án
-
-Cài đặt thủ công các thư viện cần thiết:
+Mở **Command Prompt (cmd)** hoặc **PowerShell** tại thư mục gốc của dự án:
 
 ```powershell
-# 1. Tạo và kích hoạt môi trường ảo (Khuyên dùng)
+# 1. Tạo môi trường ảo (Virtual Environment)
 python -m venv .venv
-.\.venv\Scripts\activate
 
-# 2. Cài đặt thư viện Python
+# 2. Kích hoạt môi trường ảo
+.\.venv\Scripts\activate
+# (Nếu lỗi, thử: Set-ExecutionPolicy Unrestricted -Scope Process)
+
+# 3. Cài đặt thư viện Python
 pip install -r requirements.txt
 
-# 3. Cài đặt trình duyệt cho Playwright
+# 4. Cài đặt trình duyệt cho AI Scraper
 playwright install chromium
-
-# 4. Cài đặt thư viện cho Frontend (Nếu dùng Web UI)
-cd frontend
-npm install
-cd ..
 ```
 
-### 4. Cấu hình môi trường
+### Bước 2: Chuẩn bị Frontend (Next.js)
+
+Mở một cửa sổ terminal mới, cd vào thư mục `frontend`:
+
+```powershell
+cd frontend
+
+# Cài đặt thư viện Node.js
+npm install
+```
+
+### Bước 3: Cấu hình Môi trường (.env)
+
+Quay lại thư mục gốc, copy file cấu hình mẫu:
+
 ```powershell
 copy .env.example .env
-# Mở .env và điền các API Key nếu cần (Groq, Gemini, Telegram...)
 ```
 
-### 5. Khởi động hệ thống
+**Quan trọng**: Mở file `.env` và cập nhật các thông tin sau (nếu dùng dịch vụ đám mây):
+- `GEMINI_API_KEY`: Key của Google Gemini (nếu dùng).
+- `GROQ_API_KEY`: Key của Groq (nếu dùng).
+- `DATABASE_URL`: `postgresql+asyncpg://postgres:postgres123@localhost:5432/bds_agent` (Mặc định cho Docker).
 
-Bạn cần chạy các dịnh vụ sau trên các cửa sổ Terminal khác nhau:
+### Bước 4: Khởi động Database (Docker)
+
+Đảm bảo Docker Desktop đang chạy, sau đó chạy lệnh:
 
 ```powershell
-# 1. Khởi động Database (PostgreSQL & Redis)
+# Tại thư mục gốc (nơi có file docker-compose.yml)
 docker-compose up -d
+```
+*Lần đầu sẽ mất vài phút để tải PostgreSQL và Redis.*
 
-# 2. Chạy Migrations (Cập nhật cấu trúc bảng)
-alembic upgrade head
+---
 
-# 3. Chạy Backend API Server
+## ▶️ Hướng Dẫn Chạy Hệ Thống
+
+Bạn cần mở **3 cửa sổ Terminal** riêng biệt để chạy hệ thống:
+
+### Terminal 1: Chạy Backend API
+```powershell
+# Nhớ activate venv trước: .\.venv\Scripts\activate
 python main.py api
+```
+*Server sẽ chạy tại: `http://localhost:8000`*
 
-# 4. Chạy Frontend Web UI (Mở terminal mới)
+### Terminal 2: Chạy Frontend Web UI
+```powershell
 cd frontend
 npm run dev
 ```
+*Web sẽ chạy tại: `http://localhost:3000`*
 
-## 📖 Ví dụ sử dụng
-
-### Chế độ dòng lệnh (CLI)
+### Terminal 3: Chạy Database & Debug (Tùy chọn)
+Dùng để kiểm tra dữ liệu hoặc chạy tool debug:
 ```powershell
-# Chạy demo tìm kiếm
-python main.py demo
-
-# Tìm kiếm nhanh
-python main.py search "chung cư 2PN Cầu Giấy 2-3 tỷ"
+# Activate venv: .\.venv\Scripts\activate
 ```
-
-### REST API
-```bash
-# Tìm kiếm qua API
-curl -X POST http://localhost:8000/api/v1/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "nhà riêng Ba Đình dưới 5 tỷ"}'
-
-# Lấy danh sách tin đã lưu
-curl http://localhost:8000/api/v1/listings
-```
-
-## 🔧 Cấu hình (.env)
-
-| Biến môi trường | Mô tả | Mặc định |
-| :--- | :--- | :--- |
-| `LLM_MODE` | Chế độ AI (ollama, groq, gemini) | `ollama` |
-| `OLLAMA_MODEL` | Tên model Ollama | `qwen2.5:1.5b` |
-| `DATABASE_URL` | Kết nối PostgreSQL | `postgresql+asyncpg://...` |
-| `HEADLESS_MODE` | Chạy trình duyệt ẩn | `true` |
-| `API_PORT` | Cổng chạy Backend | `8000` |
-
-## 🔒 Kiểm định dữ liệu (Data Validation)
-
-Hệ thống thực hiện quy trình kiểm tra nghiêm ngặt:
-1. **Trường bắt buộc**: Luôn có URL nguồn, tiêu đề và giá.
-2. **Số điện thoại**: Định dạng chuẩn VN, tự động làm sạch.
-3. **Giá theo khu vực**: Tự động validate giá m² dựa trên dữ liệu trung bình từng quận (ví dụ: Cầu Giấy 60-180tr/m²).
-4. **Chống trùng lặp**: Sử dụng Fingerprint (MD5) để tránh lưu tin trùng.
-5. **Lọc tin rác**: Loại bỏ các tin môi giới, ký gửi theo từ khóa.
-
-## 📊 Cấu trúc Listing (Schema)
-Dữ liệu được lưu trữ chuẩn hóa dưới dạng JSON:
-```json
-{
-  "title": "Bán chung cư 2PN tại Cầu Giấy",
-  "price_number": 3500000000,
-  "area_m2": 85.5,
-  "location": {
-    "district": "Cầu Giấy",
-    "city": "Hà Nội"
-  },
-  "contact": {
-    "phone_clean": "0912345678"
-  },
-  "source_url": "https://...",
-  "property_type": "chung cư"
-}
-```
-
-## 🐳 Triển khai với Docker
-```bash
-# Build & chạy toàn bộ dịch vụ
-docker-compose up -d
-
-# Xem logs
-docker-compose logs -f
-```
-
-## ⚠️ Lưu ý pháp lý
-- Công cụ này chỉ dành cho mục đích học tập và nghiên cứu.
-- Hãy tuân thủ file `robots.txt` và điều khoản của các website nguồn.
-- Không thu thập dữ liệu với tần suất quá cao (sử dụng delay hợp lý).
-
-## 📄 License
-MIT License
 
 ---
-**Được xây dựng với ❤️ bởi cộng đồng AI Việt Nam**
+
+## 🛠️ Công Cụ Debug & Kiểm Thử
+
+Hệ thống có sẵn các script để bạn kiểm tra tính năng mà không cần dùng Web UI:
+
+### 1. Kiểm tra Scraper (`debug_scraper.py`)
+Dùng để chạy thử AI Scraper, kiểm tra xem có lấy được tin đăng không.
+```powershell
+python debug_scraper.py
+```
+*Kết quả sẽ hiển thị log chi tiết và lưu tin vào database.*
+
+### 2. Kiểm tra Dữ liệu (`check_db_data.py`)
+Xem nhanh số lượng tin đăng đã lưu trong Database.
+```powershell
+python check_db_data.py
+```
+
+### 3. Kiểm tra Dữ liệu Analytics (`debug_analytics_data.py`)
+Kiểm tra xem dữ liệu có đủ trường số (giá/m2) để vẽ biểu đồ không.
+```powershell
+python debug_analytics_data.py
+```
+
+---
+
+## ⚠️ Các Lỗi Thường Gặp (Troubleshooting)
+
+1.  **Lỗi `ModuleNotFoundError: No module named 'playwright'`**
+    *   👉 Quên kích hoạt venv. Chạy lại: `.\.venv\Scripts\activate`.
+
+2.  **Lỗi Database `Connection refused`**
+    *   👉 Docker chưa chạy. Mở Docker Desktop và chạy `docker-compose up -d`.
+
+3.  **Lỗi `npm install` thất bại**
+    *   👉 Thử xóa thư mục `frontend/node_modules` và file `frontend/package-lock.json` rồi chạy lại `npm install`.
+
+4.  **Biểu đồ Analytics trống?**
+    *   👉 Chạy `python debug_scraper.py` để nạp dữ liệu mẫu.
+    *   👉 Refresh trang Frontend (`F5`).
+
+---
+
+**Liên hệ**: [Tên Bạn/Owner] để được hỗ trợ thêm.

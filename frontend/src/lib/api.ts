@@ -156,8 +156,8 @@ export const getSimilarListings = async (id: string, limit = 5): Promise<Listing
   return data.listings;
 };
 
-export const getAnalytics = async (): Promise<AnalyticsResponse> => {
-  const { data } = await api.get("/api/v1/analytics");
+export const getAnalytics = async (query?: string): Promise<AnalyticsResponse> => {
+  const { data } = await api.get("/api/v1/analytics", { params: { query } });
   return data;
 };
 

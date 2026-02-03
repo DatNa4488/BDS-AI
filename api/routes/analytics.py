@@ -23,33 +23,48 @@ router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 
 @router.get("", response_model=AnalyticsResponse)
-async def get_analytics():
+async def get_analytics(query: Optional[str] = Query(None)):
     """
-    Get overall analytics and statistics.
+    Get analytics, optionally filtered by search query.
     """
     async with get_session() as session:
-        # Total counts
+        # Base query for active listings
+        base_query = select(Listing).where(Listing.status == "active")
+        
+        # Apply search filter if provided
+        if query:
+            search_filter = (
+                Listing.title.ilike(f"%{query}%") | 
+                Listing.district.ilike(f"%{query}%") |
+                Listing.city.ilike(f"%{query}%")
+            )
+            base_query = base_query.where(search_filter)
+
+        # 1. Total counts (filtered)
         total_result = await session.execute(
-            select(func.count(Listing.id))
+            select(func.count(Listing.id)).where(Listing.status != "deleted")
+            .where(search_filter if query else True)
         )
         total_listings = total_result.scalar_one()
 
         active_result = await session.execute(
-            select(func.count(Listing.id))
-            .where(Listing.status == "active")
+            select(func.count(Listing.id)).where(Listing.status == "active")
+            .where(search_filter if query else True)
         )
         active_listings = active_result.scalar_one()
 
-        # Platform breakdown
-        platform_result = await session.execute(
+        # 2. Platform breakdown (filtered)
+        platform_query = (
             select(
                 Listing.source_platform,
                 func.count(Listing.id).label("count")
             )
             .where(Listing.status != "deleted")
+            .where(search_filter if query else True)
             .group_by(Listing.source_platform)
             .order_by(func.count(Listing.id).desc())
         )
+        platform_result = await session.execute(platform_query)
 
         platforms = []
         for row in platform_result:
@@ -60,8 +75,8 @@ async def get_analytics():
                 percentage=round(percentage, 1),
             ))
 
-        # District breakdown
-        district_result = await session.execute(
+        # 3. District breakdown (filtered)
+        district_query = (
             select(
                 Listing.district,
                 func.count(Listing.id).label("count"),
@@ -70,10 +85,12 @@ async def get_analytics():
             )
             .where(Listing.status == "active")
             .where(Listing.district.isnot(None))
+            .where(search_filter if query else True)
             .group_by(Listing.district)
             .order_by(func.count(Listing.id).desc())
             .limit(20)
         )
+        district_result = await session.execute(district_query)
 
         districts = []
         for row in district_result:
@@ -84,7 +101,7 @@ async def get_analytics():
                 avg_price_per_m2=int(row.avg_price_per_m2) if row.avg_price_per_m2 else None,
             ))
 
-        # Scrape stats
+        # Scrape stats (global, not filtered by query as it's system stats)
         scrape_stats_dict = await ScrapeLogCRUD.get_stats(session, days=7)
         scrape_stats = ScrapeStats(**scrape_stats_dict)
 

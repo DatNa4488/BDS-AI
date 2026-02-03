@@ -6,6 +6,8 @@ Supports Groq API (fast) with Ollama fallback (local).
 import asyncio
 import json
 import re
+import sys
+import platform
 import time
 from collections import deque
 from datetime import datetime, timedelta
@@ -17,9 +19,12 @@ from loguru import logger
 from bs4 import BeautifulSoup
 import re
 
-
+# Fix for Windows asyncio subprocess NotImplementedError
+# if platform.system() == 'Windows':
+#     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from config import settings
+from agents.tools import extract_district
 
 
 # Platform priorities for scraping
@@ -129,22 +134,34 @@ class RealEstateSearchAgent:
     Supports Groq API (fast, free) with Ollama fallback (local).
     """
 
-    def __init__(self, headless: bool = None):
+    def __init__(self, headless: bool = None, vision_mode: bool = None):
         """Initialize the search agent with LLM and rate limiter."""
         if headless is not None:
             settings.headless_mode = headless
+        if vision_mode is not None:
+            settings.browser_use_vision = vision_mode
             
+        self.llm = None # Initialize LLM later
+        self.agent = None
+        self.browser_session = None
+        self.headless = settings.headless_mode
+        self.vision_mode = settings.browser_use_vision
+        
+        # Re-enable Google-first search (with stealth mode to avoid CAPTCHA)
+        self.google_first = settings.google_search_enabled
+        
+        # Rate limiter for Groq API
+        self.request_times = deque(maxlen=30)
+        self.rate_limit_per_minute = 15 # Set explicit rate limit
+
+        # Initialize LLM after setting up basic attributes
         self.llm = self._init_llm()
         self.llm_type = "groq" if "Groq" in type(self.llm).__name__ else "ollama"
 
-        # Rate limiter for Groq API
-        self.request_times = deque(maxlen=30)
-        self.rate_limit_per_minute = settings.rate_limit_per_minute
-
         logger.info(f"✅ Agent initialized with LLM: {type(self.llm).__name__}")
-        logger.info(f"✅ Browser headless: {settings.headless_mode}")
-        logger.info(f"✅ Vision mode: {settings.browser_use_vision}")
-        logger.info(f"✅ Google-first search: {settings.google_search_enabled}")
+        logger.info(f"✅ Browser headless: {self.headless}")
+        logger.info(f"✅ Vision mode: {self.vision_mode}")
+        logger.info(f"✅ Google-first search: {self.google_first} (forced)")
 
     def _init_llm(self):
         """Initialize LLM with Groq → Ollama fallback strategy."""
@@ -215,7 +232,7 @@ Query: {query}
 
 Trả về CHÍNH XÁC JSON format (không có text khác):
 {{
-    "property_type": "chung cư | nhà riêng | biệt thự | đất nền | null",
+    "property_type": "chung cư (hoặc nhà riêng, đất nền... CHỌN 1 LOẠI DUY NHẤT)",
     "location": {{
         "city": "Hà Nội | Hồ Chí Minh",
         "district": "tên quận/huyện hoặc null"
@@ -229,7 +246,11 @@ Trả về CHÍNH XÁC JSON format (không có text khác):
     "intent": "mua | thuê"
 }}
 
-Lưu ý: 1 tỷ = 1000000000, 1 triệu = 1000000
+Lưu ý quan trọng:
+- 1 tỷ = 1000000000, 1 triệu = 1000000
+- Quận/Huyện Hà Nội: Cầu Giấy, Đống Đa, Ba Đình, Hoàn Kiếm, Thanh Xuân, Hai Bà Trưng, Long Biên, Tây Hồ, Nam Từ Liêm, Bắc Từ Liêm, Hà Đông, etc.
+- Quận TP.HCM: Quận 1, Quận 2, Quận 3, Bình Thạnh, Phú Nhuận, Gò Vấp, Thủ Đức, etc.
+- NẾU query có tên quận/huyện, PHẢI điền vào "district"
 """
 
         try:
@@ -247,12 +268,18 @@ Lưu ý: 1 tỷ = 1000000000, 1 triệu = 1000000
             parsed = self._safe_parse_json(content)
             if parsed:
                 intent = SearchIntent.from_dict(parsed)
+                
+                # Validation: If critical fields are missing, force fallback
+                if not intent.district and not intent.price_max and not intent.price_min:
+                    logger.warning("⚠️ Parsed intent is empty, triggering fallback...")
+                    raise ValueError("Empty intent from LLM")
+
                 logger.info(f"Parsed intent: property_type={intent.property_type}, "
                            f"district={intent.district}, price={intent.price_text}")
                 return intent
 
         except Exception as e:
-            logger.warning(f"Query parsing error: {e}")
+            logger.warning(f"Query parsing error or empty: {e}")
 
         # Fallback: basic regex parsing
         return self._fallback_parse_query(query)
@@ -366,7 +393,7 @@ Lưu ý: 1 tỷ = 1000000000, 1 triệu = 1000000
 
             all_listings = []
 
-            if settings.google_search_enabled:
+            if self.google_first: # Use self.google_first
                 # STEP 1: Google Search to discover URLs
                 print("\n📍 STEP 1: Google Search for URLs")
                 urls_to_scrape = await self._google_search_first(query, intent)
@@ -404,6 +431,7 @@ Lưu ý: 1 tỷ = 1000000000, 1 triệu = 1000000
 
             # STEP 3: Deduplicate
             print(f"\n📍 STEP 3: Deduplication")
+            print(f"   [DEBUG_SEARCH] Pre-dedup count: {len(all_listings)}")
             result.listings = self._deduplicate_listings(all_listings)[:max_results]
             result.total_found = len(result.listings)
 
@@ -439,37 +467,31 @@ Lưu ý: 1 tỷ = 1000000000, 1 triệu = 1000000
 
         task = f"""
 NHIỆM VỤ: Google search và collect URLs bất động sản
-
 1. Navigate to https://www.google.com
 2. Search: "{search_query}"
 3. Wait for results to load
 4. Extract TOP 10-12 organic results (skip ads):
-   - URL của mỗi kết quả
-   - Title snippet
+   - URL
+   - Title
 
-5. Identify platform từ URL:
-   - chotot.com hoặc nhatot.com → "chotot"
-   - batdongsan.com.vn → "batdongsan"
-   - mogi.vn → "mogi"
-   - alonhadat.com.vn → "alonhadat"
-   - nhadat247.com.vn → "nhadat247"
-   - muaban.net → "muaban"
-   - facebook.com → "facebook"
-   - other → "other"
+5. Identify platform (domain):
+   - chotot, batdongsan, mogi, alonhadat, muaban, facebook
 
-6. LOẠI BỎ URLs từ:
-   - Tin tức: vnexpress, dantri, cafef, vietnamnet
-   - Ads/sponsored links
-   - Youtube, tiktok
-   - Diễn đàn: webtretho, otofun
+6. Exclude:
+   - News/Articles (vnexpress, dantri...)
+   - Ads/Sponsored
+   - E-commerce (shopee, lazada, tiki, amazon, walmart, ebay) -> IGNORE THESE!
 
-7. Return JSON array:
+7. Return JSON array ONLY:
 [
-  {{"url": "https://...", "platform": "batdongsan", "title": "..."}},
-  {{"url": "https://...", "platform": "chotot", "title": "..."}}
+  {{"url": "https://...", "platform": "batdongsan", "title": "..."}}
 ]
 
-CHỈ return JSON array, không có text khác.
+IMPORTANT:
+- REAL ESTATE / BẤT ĐỘNG SẢN ONLY!
+- NO SHOPPING! NO LAPTOPS! NO AMAZON/WALMART!
+- Output JSON ONLY.
+- Do NOT search for this text.
 """
 
         try:
@@ -712,14 +734,51 @@ CHỈ return JSON array với data THẬT từ page, không fake.
         
         async with async_playwright() as p:
             # Launch browser
+            # Launch browser with stealth args
             browser = await p.chromium.launch(
                 headless=settings.headless_mode,
-                args=["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage"]
+                args=[
+                    "--disable-blink-features=AutomationControlled",  # Hide automation
+                    "--disable-gpu", 
+                    "--no-sandbox", 
+                    "--disable-dev-shm-usage",
+                    "--disable-web-security",  # For CORS
+                    "--disable-features=IsolateOrigins,site-per-process"
+                ]
             )
+            
+            # Stealth context with realistic user agent
+            import random
+            user_agents = [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            ]
+            
             context = await browser.new_context(
-                viewport={"width": 1280, "height": 800},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                viewport={"width": random.randint(1366, 1920), "height": random.randint(768, 1080)},
+                user_agent=random.choice(user_agents),
+                locale="vi-VN",
+                timezone_id="Asia/Ho_Chi_Minh",
+                extra_http_headers={
+                    "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+                }
             )
+            
+            # Add stealth scripts to hide WebDriver
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+                
+                window.chrome = {
+                    runtime: {},
+                };
+                
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+            """)
             
             try:
                 for platform in platforms:
@@ -739,9 +798,11 @@ CHỈ return JSON array với data THẬT từ page, không fake.
                             listings = await self._scrape_batdongsan_direct(page, intent)
                             
                         if listings:
+                            print(f"[DEBUG_FALLBACK] Got {len(listings)} from {platform}")
                             all_listings.extend(listings)
                             logger.info(f"Platform {platform}: found {len(listings)} listings")
                         else:
+                            print(f"[DEBUG_FALLBACK] Got 0 from {platform}")
                             logger.warning(f"Platform {platform}: found 0 listings")
                             
                         await page.close()
@@ -752,20 +813,60 @@ CHỈ return JSON array với data THẬT từ page, không fake.
 
                     # Delay between platforms
                     if platform != platforms[-1]:
-                        delay = settings.delay_between_urls
-                        logger.info(f"⏳ Waiting {delay}s for rate limit cooldown...")
-                        await asyncio.sleep(delay)
+                        logger.info(f"⏳ Waiting 5s for rate limit cooldown...")
+                        await asyncio.sleep(5)
                         
             finally:
                 await browser.close()
 
-        return all_listings
+    def _filter_listings_by_intent(self, listings: List[Dict], intent: SearchIntent) -> List[Dict]:
+        """Filter listings based on search intent (Price, District)."""
+        filtered = []
+        print(f"   [FILTER] Checking {len(listings)} listings against intent: Price < {intent.price_max}, Dist: {intent.district}")
+        for listing in listings:
+            # 1. Price Check
+            price = listing.get("price_number")
+            if price:
+                # Max price check (with 10% buffer)
+                if intent.price_max and price > (intent.price_max * 1.1):
+                    print(f"   [REJECT] Price {listing.get('price_text')} ({price}) > max {intent.price_max}")
+                    continue
+                # Min price check (with 10% buffer)
+                if intent.price_min and price < (intent.price_min * 0.9):
+                    print(f"   [REJECT] Price {listing.get('price_text')} ({price}) < min {intent.price_min}")
+                    continue
+
+            # 2. Location Check (Optional: Could strict filter by district)
+            # For now, we trust the scraper's context, but we ensure district is filled
+            if not listing["location"]["district"] and intent.district:
+                listing["location"]["district"] = intent.district
+            
+            filtered.append(listing)
+        
+        print(f"   [FILTER] Kept {len(filtered)}/{len(listings)} listings")
+        return filtered
 
     async def _scrape_chotot_direct(self, page, intent) -> List[Dict]:
         """Scrape Chợ Tốt using robust BeautifulSoup parsing."""
-        query = f"{intent.property_type or 'bất động sản'} {intent.district or intent.city}"
-        encoded_query = query.replace(" ", "+")
-        url = f"https://nha.chotot.com/toan-quoc/mua-ban-bat-dong-san?q={encoded_query}"
+        # Clean up property type for better search
+        prop_type = intent.property_type
+        if prop_type and "|" in prop_type:
+            prop_type = prop_type.split("|")[0].strip()
+            
+        query = f"{prop_type or 'bất động sản'} {intent.district or ''}"
+        encoded_query = query.strip().replace(" ", "+")
+        
+        # Determine region slug
+        region_slug = "toan-quoc"
+        if intent.city:
+            if "hà nội" in intent.city.lower():
+                region_slug = "ha-noi"
+            elif "hồ chí minh" in intent.city.lower():
+                region_slug = "tp-ho-chi-minh"
+            elif "đà nẵng" in intent.city.lower():
+                region_slug = "da-nang"
+        
+        url = f"https://nha.chotot.com/{region_slug}/mua-ban-bat-dong-san?q={encoded_query}"
         
         print(f"   🌐 Navigating to: {url}")
         # Chotot uses Next.js, wait for network idle to ensure hydration
@@ -802,7 +903,8 @@ CHỈ return JSON array với data THẬT từ page, không fake.
                 
                 # Extract Area
                 area_match = area_pattern.search(text)
-                area = area_match.group(1) if area_match else ""  # Get number only
+                area_str = area_match.group(1) if area_match else ""
+                area = self._normalize_vietnamese_number(area_str) if area_str else None
                 
                 # Location (heuristic: extract from text if possible, e.g. "Hà Nội", "Quận X")
                 address = "N/A"
@@ -815,11 +917,29 @@ CHỈ return JSON array với data THẬT từ page, không fake.
                 phone_match = phone_pattern.search(text)
                 phone = phone_match.group(0) if phone_match else "Liên hệ"
 
-                location = {"address": address, "city": address} 
+                # Location
+                district = extract_district(text)
+                
+                # Strong Fallback: If searching for a specific district, assume listings are in that district
+                if not district and intent.district:
+                    district = intent.district
 
+                # City Fallback
+                city = intent.city if intent.city else "Hà Nội"
+
+                location = {
+                    "address": address if address != "N/A" else f"{district}, {city}", 
+                    "city": city,
+                    "district": district
+                } 
+
+                # Parse price to number
+                price_number = self._parse_price_to_number(price)
+                
                 listings.append({
                     "title": title,
                     "price_text": price,
+                    "price_number": price_number,
                     "area_m2": area,
                     "location": location,
                     "contact": {"phone_clean": phone}, 
@@ -830,17 +950,67 @@ CHỈ return JSON array với data THẬT từ page, không fake.
                 if len(listings) >= 5: break
         
         print(f"   Extracted {len(listings)} listings from Chotot")
-        return listings
+        return self._filter_listings_by_intent(listings, intent)
 
     async def _scrape_batdongsan_direct(self, page, intent) -> List[Dict]:
-        """Scrape Batdongsan using robust BeautifulSoup parsing."""
-        query = f"{intent.property_type or 'nhà đất'} {intent.district or intent.city}"
-        url = "https://batdongsan.com.vn/ban-nha-dat"
-        if intent.city:
-             slug = "ha-noi" if "hà nội" in intent.city.lower() else "ho-chi-minh"
-             url = f"https://batdongsan.com.vn/ban-nha-dat-{slug}"
-             
+        """Scrape Batdongsan using robust BeautifulSoup parsing with district targeting."""
+        
+        # Map common districts to slugs
+        district_slugs = {
+            "cầu giấy": "cau-giay",
+            "đống đa": "dong-da",
+            "ba đình": "ba-dinh",
+            "hoàn kiếm": "hoan-kiem",
+            "thanh xuân": "thanh-xuan",
+            "hai bà trưng": "hai-ba-trung",
+            "long biên": "long-bien",
+            "tây hồ": "tay-ho",
+            "nam từ liêm": "nam-tu-liem",
+            "bắc từ liêm": "bac-tu-liem",
+            "hà đông": "ha-dong",
+            "hoàng mai": "hoang-mai",
+            "thanh trì": "thanh-tri",
+            "gia lâm": "gia-lam",
+            "đông anh": "dong-anh",
+            "sóc sơn": "soc-son",
+            "hoài đức": "hoai-duc",
+            "thạch thất": "thach-that",
+            "quốc oai": "quoc-oai",
+            "thanh oai": "thanh-oai",
+            "thường tín": "thuong-tin",
+            "mê linh": "me-linh",
+            "chương mỹ": "chuong-my",
+            "sơn tây": "son-tay",
+            "ba vì": "ba-vi",
+            "phúc thọ": "phuc-tho",
+            "đan phượng": "dan-phuong",
+            "ứng hòa": "ung-hoa",
+            "mỹ đức": "my-duc",
+            "phú xuyên": "phu-xuyen"
+        }
+
+        # Construct optimized URL
+        base_url = "https://batdongsan.com.vn/ban-nha-dat"
+        city_slug = "ha-noi"
+        
+        if intent.city and "hồ chí minh" in intent.city.lower():
+            city_slug = "ho-chi-minh"
+        
+        target_path = f"{base_url}-{city_slug}"
+
+        # If specific district found, use its slug instead of city
+        if intent.district:
+            d_lower = intent.district.lower().replace("quận", "").replace("huyện", "").strip()
+            if d_lower in district_slugs:
+                target_path = f"{base_url}-{district_slugs[d_lower]}"
+            elif city_slug == "ha-noi":
+                # Try naive slugify if not in map
+                 naive_slug = d_lower.replace(" ", "-")
+                 target_path = f"{base_url}-{naive_slug}"
+
+        url = target_path
         print(f"   🌐 Navigating to: {url}")
+        
         await page.goto(url, wait_until="domcontentloaded", timeout=60000)
         await page.wait_for_timeout(3000)
         
@@ -892,11 +1062,29 @@ CHỈ return JSON array với data THẬT từ page, không fake.
                     phone_match = phone_pattern.search(text)
                     phone = phone_match.group(0) if phone_match else "Liên hệ"
 
+                    # Normalize area value to handle Vietnamese decimals
+                    area_normalized = self._normalize_vietnamese_number(area_val) if area_val else None
+                    
+                    # Parse price to number
+                    price_number = self._parse_price_to_number(price_match.group(0))
+                    
+                    # Location
+                    district = extract_district(text)
+                    if not district and intent.district:
+                        district = intent.district
+                        
+                    location = {
+                        "address": address,
+                        "district": district,
+                        "city": intent.city or "Hà Nội"
+                    }
+                    
                     listings.append({
                         "title": link_tag.get_text(" ", strip=True) or (item.find('h3').get_text(strip=True) if item.find('h3') else "No Title"),
                         "price_text": price_match.group(0),
-                        "area_m2": area_val,
-                        "location": {"address": address}, 
+                        "price_number": price_number,
+                        "area_m2": area_normalized,  # Use normalized value
+                        "location": location,
                         "contact": {"phone_clean": phone},
                         "source_url": full_url,
                         "source_platform": "batdongsan"
@@ -905,7 +1093,28 @@ CHỈ return JSON array với data THẬT từ page, không fake.
                 if len(listings) >= 5: break
                 
         print(f"   Extracted {len(listings)} listings from Batdongsan")
-        return listings
+        return self._filter_listings_by_intent(listings, intent)
+
+    @staticmethod
+    def _parse_price_to_number(price_text: str) -> Optional[float]:
+        """
+        Parse Vietnamese price text to number in VND.
+        Examples:
+            "29,88 tỷ" → 29880000000
+            "3.5 tỷ" → 3500000000
+            "500 triệu" → 500000000
+            "Thỏa thuận" → None
+        """
+        if not price_text or not isinstance(price_text, str):
+            return None
+        
+        # Skip if contains negotiation keywords
+        negotiation_keywords = ['thỏa thuận', 'liên hệ', 'thoả thuận', 'lien he']
+        if any(kw in price_text.lower() for kw in negotiation_keywords):
+            return None
+        
+        # Use the normalize function which already handles tỷ/triệu
+        return RealEstateSearchAgent._normalize_vietnamese_number(price_text)
 
     async def _rate_limit_wait(self):
         """Wait if approaching Groq rate limit."""
@@ -918,11 +1127,56 @@ CHỈ return JSON array với data THẬT từ page, không fake.
 
         if len(recent_requests) >= self.rate_limit_per_minute:
             oldest = min(recent_requests)
-            wait_time = 60 - (now - oldest) + 3  # +3s buffer
+            wait_time = 60 - (now - oldest) + 1  # Reduced buffer from 3s to 1s
 
             if wait_time > 0:
                 print(f"   ⏸️ Rate limit: waiting {wait_time:.0f}s...")
                 await asyncio.sleep(wait_time)
+
+    @staticmethod
+    def _normalize_vietnamese_number(value: str) -> Optional[float]:
+        """Convert Vietnamese number format to float.
+        Examples: '67,5' -> 67.5, '1.200' -> 1200, '2,5 tỷ' -> 2500000000
+        """
+        if not value or not isinstance(value, str):
+            return None
+        
+        try:
+            # Remove whitespace and convert to lowercase
+            value = value.strip().lower()
+            
+            # Handle billion/million suffixes
+            multiplier = 1
+            if 'tỷ' in value or 'ty' in value:
+                multiplier = 1_000_000_000
+                value = value.replace('tỷ', '').replace('ty', '').strip()
+            elif 'triệu' in value or 'tr' in value:
+                multiplier = 1_000_000
+                value = value.replace('triệu', '').replace('tr', '').strip()
+            
+            # Remove any non-numeric characters except comma and dot
+            value = re.sub(r'[^0-9,.]', '', value)
+            
+            # Determine if comma is decimal separator or thousands separator
+            # If there's both comma and dot, assume European format (1.234,56)
+            if ',' in value and '.' in value:
+                # European: 1.234,56 -> remove dots, replace comma with dot
+                value = value.replace('.', '').replace(',', '.')
+            elif ',' in value:
+                # Vietnamese decimal: 67,5 -> 67.5
+                # But also handle thousands: 1,200 -> 1200
+                parts = value.split(',')
+                if len(parts) == 2 and len(parts[1]) <= 2:
+                    # Likely decimal: 67,5
+                    value = value.replace(',', '.')
+                else:
+                    # Likely thousands: 1,200
+                    value = value.replace(',', '')
+            
+            result = float(value) * multiplier
+            return result if result > 0 else None
+        except (ValueError, AttributeError):
+            return None
 
     @staticmethod
     def _detect_platform(url: str) -> str:
@@ -1080,6 +1334,7 @@ Trả về JSON array:
 
     def _deduplicate_listings(self, listings: List[Dict]) -> List[Dict]:
         """Remove duplicate listings based on URL, title, or phone."""
+        print(f"   [DEDUP] Processing {len(listings)} listings...")
         seen_urls = set()
         seen_titles = set()
         unique = []
@@ -1093,13 +1348,15 @@ Trả về JSON array:
             # Create multiple keys for dedup
             url_key = url if url else None
             title_key = title if title else None
-
+            
             # Check if duplicate
             is_dup = False
             if url_key and url_key in seen_urls:
                 is_dup = True
+                print(f"   [DEDUP] Duplicate URL: {url_key}")
             if title_key and title_key in seen_titles:
                 is_dup = True
+                print(f"   [DEDUP] Duplicate Title: {title_key}")
 
             if not is_dup:
                 if url_key:
@@ -1107,8 +1364,11 @@ Trả về JSON array:
                 if title_key:
                     seen_titles.add(title_key)
                 unique.append(listing)
+            else:
+                 print(f"   [DEDUP] Dropped listing: {title}")
 
         logger.info(f"Deduplicated: {len(listings)} -> {len(unique)} listings")
+        print(f"   [DEDUP] Final count: {len(unique)}")
         return unique
 
     async def close(self):

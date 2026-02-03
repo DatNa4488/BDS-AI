@@ -1,6 +1,5 @@
 "use client";
 
-import { use } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -35,9 +34,9 @@ import {
 export default function ListingDetailPage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: { id: string };  // Changed: Remove Promise wrapper
 }) {
-  const { id } = use(params);
+  const id = params.id;  // Direct access
 
   const { data: listing, isLoading } = useQuery({
     queryKey: ["listing", id],

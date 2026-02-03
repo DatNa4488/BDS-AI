@@ -4,12 +4,17 @@ Main entry point for running the agent.
 """
 import asyncio
 import sys
+import platform
 from datetime import datetime
 
 from loguru import logger
 
 from config import settings
 from agents.search_agent import RealEstateSearchAgent, quick_search
+
+# Fix for Windows asyncio subprocess NotImplementedError
+if platform.system() == 'Windows':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 def setup_logging():
@@ -170,7 +175,7 @@ Hướng dẫn sử dụng:
         await agent.close()
 
 
-async def main():
+def main():
     """Main entry point."""
     setup_logging()
 
@@ -183,15 +188,15 @@ async def main():
         command = sys.argv[1].lower()
 
         if command == "demo":
-            await demo_search()
+            asyncio.run(demo_search())
 
         elif command == "interactive":
-            await interactive_mode()
+            asyncio.run(interactive_mode())
 
         elif command == "search":
             if len(sys.argv) > 2:
                 query = " ".join(sys.argv[2:])
-                result = await quick_search(query)
+                result = asyncio.run(quick_search(query))
                 print(f"Found {result.total_found} results")
                 for listing in result.listings:
                     print(f"  - {listing['title']}")
@@ -213,7 +218,7 @@ async def main():
         elif command == "scheduler":
             # Start scheduler only
             from scheduler.jobs import start_scheduler
-            await start_scheduler()
+            asyncio.run(start_scheduler())
 
         else:
             print(f"""
@@ -236,8 +241,8 @@ Examples:
             """)
     else:
         # Default: run demo
-        await demo_search()
+        asyncio.run(demo_search())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

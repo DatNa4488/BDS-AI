@@ -17,7 +17,6 @@ import { useState } from "react";
 const navItems = [
   { href: "/", label: "Trang chủ", icon: Home },
   { href: "/search", label: "Tìm kiếm", icon: Search },
-  { href: "/listings", label: "Danh sách", icon: LayoutList },
   { href: "/analytics", label: "Phân tích", icon: BarChart3 },
 ];
 
@@ -35,24 +34,26 @@ export function Header() {
         </Link>
 
         {/* Desktop Nav */}
-        <nav className="hidden md:flex items-center space-x-6 text-sm font-medium">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-2 transition-colors hover:text-foreground/80",
-                pathname === item.href
-                  ? "text-foreground"
-                  : "text-foreground/60"
-              )}
-            >
-              <item.icon className="h-4 w-4" />
-              {item.label}
-            </Link>
-          ))}
+        <nav className="hidden md:flex items-center gap-6">
+          <Link
+            href="/"
+            className="text-sm font-medium transition-colors hover:text-primary"
+          >
+            Trang chủ
+          </Link>
+          <Link
+            href="/search"
+            className="text-sm font-medium transition-colors hover:text-primary"
+          >
+            Tìm kiếm
+          </Link>
+          <Link
+            href="/analytics"
+            className="text-sm font-medium transition-colors hover:text-primary"
+          >
+            Phân tích
+          </Link>
         </nav>
-
         {/* Spacer */}
         <div className="flex-1" />
 

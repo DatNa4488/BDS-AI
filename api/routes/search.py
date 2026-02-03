@@ -117,11 +117,14 @@ async def search_listings(request: SearchRequest) -> SearchResponse:
             for r in vector_results:
                 results.append(listing_to_search_result(r))
 
-        # Step 2: If not enough results and real-time requested, scrape
-        if len(results) < 10 and request.search_realtime:
+        # Step 2: Real-time scraping if requested
+        # Always scrape when realtime=True to get fresh results
+        if request.search_realtime:
             from_cache = False
+            logger.info(f"🔴 Starting real-time scraping for: {request.query}")
 
-            agent = RealEstateSearchAgent(headless=True)
+            # Use visible browser (headless=False) for debugging
+            agent = RealEstateSearchAgent(headless=False)
             try:
                 search_result = await agent.search(
                     request.query,
@@ -133,14 +136,55 @@ async def search_listings(request: SearchRequest) -> SearchResponse:
                 errors.extend(search_result.errors)
                 synthesis = search_result.synthesis
 
-                # Add real-time results
-                for listing in search_result.listings:
-                    results.append(listing_to_search_result(listing))
+                # Add real-time results (prioritize over cached)
+                # Save to PostgreSQL
+                from storage.database import get_session, ListingCRUD
+                
+                async with get_session() as session:
+                    saved_count = 0
+                    for listing in search_result.listings:
+                        # Ensure ID is present (hash of URL if missing)
+                        if not listing.get("id"):
+                            import hashlib
+                            listing["id"] = hashlib.md5(listing.get("source_url", "").encode()).hexdigest()
+                        
+                        # Prepare data for DB (flatten location)
+                        db_listing = listing.copy()
+                        if "location" in db_listing and isinstance(db_listing["location"], dict):
+                            loc = db_listing.pop("location")
+                            db_listing["address"] = loc.get("address")
+                            db_listing["ward"] = loc.get("ward")
+                            db_listing["district"] = loc.get("district")
+                            db_listing["city"] = loc.get("city")
+
+                        if "contact" in db_listing and isinstance(db_listing["contact"], dict):
+                            contact = db_listing.pop("contact")
+                            db_listing["contact_name"] = contact.get("name")
+                            db_listing["contact_phone"] = contact.get("phone")
+                            db_listing["contact_phone_clean"] = contact.get("phone_clean")
+
+                        # Truncate fields to prevent SQL errors
+                        if db_listing.get("title"):
+                            db_listing["title"] = db_listing["title"][:490]
+                        if db_listing.get("address"):
+                            db_listing["address"] = db_listing["address"][:490]
+                        if db_listing.get("source_url"):
+                            db_listing["source_url"] = db_listing["source_url"][:490]
+                            
+                        # Upsert to DB
+                        await ListingCRUD.upsert(session, db_listing)
+                        saved_count += 1
+                        
+                        # Add to results list
+                        results.insert(0, listing_to_search_result(listing))
+                        
+                    logger.info(f"💾 Saved {saved_count} listings to PostgreSQL")
 
                 # Save to vector DB for future searches
                 if search_result.listings:
                     from storage.vector_db import index_listings
                     await index_listings(search_result.listings)
+                    logger.info(f"✅ Indexed {len(search_result.listings)} new listings")
 
             finally:
                 await agent.close()
