@@ -80,14 +80,24 @@ ollama pull qwen2.5:1.5b
 ```
 
 ### 3. Cài đặt dự án
-Sử dụng Makefile để cài đặt nhanh:
-```powershell
-# Cài đặt tất cả phụ thuộc (Python & Node.js)
-make install
 
-# Hoặc cài thủ công:
+Cài đặt thủ công các thư viện cần thiết:
+
+```powershell
+# 1. Tạo và kích hoạt môi trường ảo (Khuyên dùng)
+python -m venv .venv
+.\.venv\Scripts\activate
+
+# 2. Cài đặt thư viện Python
 pip install -r requirements.txt
+
+# 3. Cài đặt trình duyệt cho Playwright
 playwright install chromium
+
+# 4. Cài đặt thư viện cho Frontend (Nếu dùng Web UI)
+cd frontend
+npm install
+cd ..
 ```
 
 ### 4. Cấu hình môi trường
@@ -97,18 +107,22 @@ copy .env.example .env
 ```
 
 ### 5. Khởi động hệ thống
+
+Bạn cần chạy các dịnh vụ sau trên các cửa sổ Terminal khác nhau:
+
 ```powershell
-# Chạy Database (PostgreSQL & Redis)
+# 1. Khởi động Database (PostgreSQL & Redis)
 docker-compose up -d
 
-# Chạy Migrations để tạo bảng
-make migrate
+# 2. Chạy Migrations (Cập nhật cấu trúc bảng)
+alembic upgrade head
 
-# Chạy Backend (API Server)
-make backend
+# 3. Chạy Backend API Server
+python main.py api
 
-# Chạy Frontend (Web UI) - Mở terminal mới
-make frontend
+# 4. Chạy Frontend Web UI (Mở terminal mới)
+cd frontend
+npm run dev
 ```
 
 ## 📖 Ví dụ sử dụng
@@ -174,10 +188,10 @@ Dữ liệu được lưu trữ chuẩn hóa dưới dạng JSON:
 ## 🐳 Triển khai với Docker
 ```bash
 # Build & chạy toàn bộ dịch vụ
-make deploy
+docker-compose up -d
 
 # Xem logs
-make logs
+docker-compose logs -f
 ```
 
 ## ⚠️ Lưu ý pháp lý

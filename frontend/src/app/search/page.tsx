@@ -78,7 +78,7 @@ function SearchContent() {
           </h2>
           {data && (
             <span className="text-muted-foreground">
-              {data.total} kết quả ({data.search_time_ms}ms)
+              {data.total} kết quả ({data.execution_time_ms}ms)
             </span>
           )}
         </div>
@@ -101,7 +101,7 @@ function SearchContent() {
         )}
 
         {/* Empty State */}
-        {!isLoading && query && data?.listings?.length === 0 && (
+        {!isLoading && query && data?.results?.length === 0 && (
           <div className="text-center py-12">
             <p className="text-muted-foreground">
               Không tìm thấy kết quả phù hợp. Thử thay đổi từ khóa hoặc bộ lọc.
@@ -110,9 +110,9 @@ function SearchContent() {
         )}
 
         {/* Results Grid */}
-        {data?.listings && data.listings.length > 0 && (
+        {data?.results && data.results.length > 0 && (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {data.listings.map((listing) => (
+            {data.results.map((listing) => (
               <ListingCard key={listing.id} listing={listing} />
             ))}
           </div>

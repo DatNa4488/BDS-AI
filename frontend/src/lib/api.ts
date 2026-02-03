@@ -54,11 +54,39 @@ export interface SearchRequest {
   search_realtime?: boolean;
 }
 
+export interface SearchResultItem {
+  id: string;
+  title: string;
+  price_text: string | null;
+  price_number: number | null;
+  area_m2: number | null;
+  location: {
+    address?: string;
+    ward?: string;
+    district?: string;
+    city?: string;
+  } | null;
+  contact: {
+    name?: string;
+    phone?: string;
+    phone_clean?: string;
+  } | null;
+  thumbnail: string | null;
+  source_url: string;
+  source_platform: string;
+  property_type: string | null;
+  bedrooms: number | null;
+  similarity_score: number | null;
+}
+
 export interface SearchResponse {
-  listings: Listing[];
+  results: SearchResultItem[];
   total: number;
-  query: string;
-  search_time_ms: number;
+  from_cache: boolean;
+  sources: string[];
+  execution_time_ms: number;
+  synthesis?: string;
+  errors?: string[];
 }
 
 export interface PaginatedResponse<T> {
@@ -96,6 +124,7 @@ export interface District {
 // API functions
 export const searchListings = async (params: SearchRequest): Promise<SearchResponse> => {
   const { data } = await api.post("/api/v1/search", params);
+  // Backend returns 'results', ensure we use it correctly
   return data;
 };
 

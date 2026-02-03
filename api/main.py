@@ -4,6 +4,7 @@ BDS Agent - Hệ thống tìm kiếm bất động sản tự động.
 """
 
 import asyncio
+import sys
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -18,6 +19,10 @@ from storage.database import init_db, close_db, get_session
 from storage.vector_db import VectorDB
 from scheduler.jobs import get_scheduler, setup_jobs
 from config import settings
+
+# Fix for Windows: Set event loop policy to support subprocess (Playwright)
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 # Configure logging
@@ -126,6 +131,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
         "http://localhost:5173", 
         "*"
     ],

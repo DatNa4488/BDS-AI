@@ -21,10 +21,10 @@ import {
   getPlatformColor,
   truncate,
 } from "@/lib/utils";
-import type { Listing } from "@/lib/api";
+import type { Listing, SearchResultItem } from "@/lib/api";
 
 interface ListingCardProps {
-  listing: Listing;
+  listing: Listing | SearchResultItem;
   variant?: "default" | "compact";
 }
 
@@ -44,7 +44,10 @@ export function ListingCard({ listing, variant = "default" }: ListingCardProps) 
             <div className="flex items-center gap-1 text-muted-foreground mt-1">
               <MapPin className="h-3 w-3" />
               <span className="text-sm truncate">
-                {listing.district || listing.address || "Không xác định"}
+                {/* Handle both Listing (flat) and SearchResultItem (nested location) */}
+                {typeof listing.location === 'object' && listing.location !== null
+                  ? listing.location.district || listing.location.address || "Không xác định"
+                  : (listing as any).district || (listing as any).address || "Không xác định"}
               </span>
             </div>
           </div>
@@ -58,11 +61,12 @@ export function ListingCard({ listing, variant = "default" }: ListingCardProps) 
         {/* Price */}
         <div className="mb-3">
           <div className="text-2xl font-bold text-primary">
-            {formatPrice(listing.price_number)}
+            {listing.price_text || formatPrice(listing.price_number)}
           </div>
-          {listing.price_per_m2 && (
+          {/* Handle both price_per_m2 (Listing) and calculated from price/area (SearchResultItem) */}
+          {((listing as any).price_per_m2 || (listing.price_number && listing.area_m2 && listing.price_number / listing.area_m2)) && (
             <div className="text-sm text-muted-foreground">
-              {formatPricePerM2(listing.price_per_m2)}
+              {formatPricePerM2((listing as any).price_per_m2 || (listing.price_number! / listing.area_m2!))}
             </div>
           )}
         </div>
@@ -81,10 +85,10 @@ export function ListingCard({ listing, variant = "default" }: ListingCardProps) 
               <span>{listing.bedrooms} PN</span>
             </div>
           )}
-          {listing.bathrooms && (
+          {(listing as any).bathrooms && (
             <div className="flex items-center gap-1">
               <Bath className="h-4 w-4" />
-              <span>{listing.bathrooms} WC</span>
+              <span>{(listing as any).bathrooms} WC</span>
             </div>
           )}
         </div>
@@ -95,22 +99,23 @@ export function ListingCard({ listing, variant = "default" }: ListingCardProps) 
             {getPropertyTypeLabel(listing.property_type)}
           </Badge>
           <span className="text-muted-foreground">
-            {formatRelativeDate(listing.scraped_at)}
+            {formatRelativeDate((listing as any).scraped_at || new Date().toISOString())}
           </span>
         </div>
 
         {/* Description */}
-        {!isCompact && listing.description && (
+        {!isCompact && (listing as any).description && (
           <p className="mt-3 text-sm text-muted-foreground line-clamp-2">
-            {truncate(listing.description, 150)}
+            {truncate((listing as any).description, 150)}
           </p>
         )}
       </CardContent>
 
       <CardFooter className="pt-0 gap-2">
-        {listing.contact_phone && (
+        {/* Handle both contact_phone (Listing) and contact.phone (SearchResultItem) */}
+        {((listing as any).contact_phone || (typeof listing.contact === 'object' && listing.contact?.phone)) && (
           <Button variant="outline" size="sm" className="flex-1" asChild>
-            <a href={`tel:${listing.contact_phone}`}>
+            <a href={`tel:${(listing as any).contact_phone || listing.contact?.phone}`}>
               <Phone className="h-4 w-4 mr-1" />
               Liên hệ
             </a>
