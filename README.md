@@ -4,18 +4,63 @@ Hệ thống AI chuyên nghiệp tự động thu thập (scrape), phân tích v
 
 ---
 
-## 🌟 Tính Năng Mới & Cải Tiến
+## �️ Kiến Trúc Hệ Thống (System Architecture)
 
-### 1. **Kiến Trúc Hybrid AI (Gemini + Local Ollama)**
-Hệ thống sử dụng mô hình AI thông minh nhất (**Gemini 2.0 Flash**) cho các phân tích sâu. Khi gặp lỗi kết nối hoặc hết hạn mức (Quota Exceeded), hệ thống sẽ **tự động chuyển sang Ollama (Qwen 2.5)** chạy cục bộ, đảm bảo hoạt động liên tục 24/7.
+Hệ thống được xây dựng theo kiến trúc Micro-services đơn giản (Modular Monolith) với sự kết hợp giữa xử lý ngôn ngữ tự nhiên (LLM) và học máy truyền thống (ML).
 
-### 2. **Professional UI & UX**
-- Giao diện **Dark Charcoal & Slate Gradient** sang trọng, hiện đại.
-- Chatbot thông minh với khả năng tự xuống dòng và cuộn tin nhắn.
-- Module định giá trực quan, tích hợp cả phân tích thị trường từ LLM và dự báo từ AutoML.
+### 1. Sơ đồ luồng dữ liệu (Data Flow)
 
-### 3. **API v1 Standard**
-Tất cả các endpoint đã được chuẩn hóa theo tiền tố `/api/v1/`, giúp việc tích hợp và mở rộng dễ dàng hơn.
+```mermaid
+graph TD
+    User((Người dùng)) -->|Yêu cầu| UI[Frontend Next.js]
+    UI -->|API v1| API[FastAPI Backend]
+    
+    subgraph "AI & Processing Layer"
+        API -->|Search Query| SA[Search Agent]
+        API -->|Valuation Req| VS[Valuation Service]
+        SA -->|Scrape| BW[Browser-use / Playwright]
+        VS -->|Predict| ML[AutoGluon ML Service]
+        VS -->|Analyze| LS[LLM Service]
+    end
+    
+    subgraph "Storage Layer"
+        ML -->|Dữ liệu huấn luyện| DB[(PostgreSQL)]
+        SA -->|Lưu tin đăng| DB
+        SA -->|Vector Embeddings| VDB[(ChromaDB)]
+    end
+    
+    subgraph "Hybrid LLM Logic"
+        LS -->|Ưu tiên| Gemini[Google Gemini 2.0]
+        Gemini -.->|Lỗi/Hết Quota| Ollama[Local Ollama - Qwen 2.5]
+    end
+```
+
+### 2. Các thành phần chính
+
+- **Search Agent**: Sử dụng `browser-use` để điều khiển trình duyệt như người thật, tự động vượt qua các lớp bảo mật để thu thập dữ liệu bất động sản từ Batdongsan, Chợ Tốt.
+- **LLM Service (Resilient Layer)**: Đóng vai trò bộ não. Sử dụng cơ chế Fallback độc đáo. Nếu API đám mây (Gemini) gặp sự cố, hệ thống tự động gọi Ollama chạy ngay trên máy của bạn để xử lý chat và phân tích JSON.
+- **ML Service (Valuation)**: Sử dụng **AutoGluon** để huấn luyện mô hình dự báo giá dựa trên dữ liệu thực tế đã cào được. Đây là con số tham chiếu khách quan bên cạnh phân tích của LLM.
+- **Vector Database (ChromaDB)**: Chuyển đổi thông tin tin đăng thành các vector không gian, cho phép tìm kiếm theo ngữ nghĩa (Semantic Search) thay vì chỉ tìm theo từ khóa.
+
+---
+
+## 🌟 Tính Năng Nổi Bật
+
+- **Hybrid AI Fallback**: Đảm bảo hệ thống không bao giờ "chết" khi mất internet hoặc hết tiền API.
+- **AutoML Integration**: Tự động huấn luyện lại mô hình định giá hàng ngày khi có dữ liệu mới.
+- **Semantic Search**: Tìm kiếm thông minh: "Mua nhà cho người thích yên tĩnh, gần hồ" thay vì chỉ "mua nhà Tây Hồ".
+- **Professional UI**: Giao diện tối ưu cho trải nghiệm người dùng với tone màu Slate hiện đại, dịu mắt.
+
+---
+
+## 📂 Cấu Trúc Thư Mục
+
+- `/api`: Chứa các routes FastAPI, logic xử lý API v1.
+- `/agents`: Các Agent thông minh xử lý cào dữ liệu và tìm kiếm.
+- `/services`: Chứa logic nghiệp vụ chính (LLM, ML, Valuation).
+- `/storage`: Cấu hình Database (PostgreSQL) và Vector DB (ChromaDB).
+- `/frontend`: Mã nguồn giao diện Next.js 14+ với TailwindCSS và ShadcnUI.
+- `/scheduler`: Các tác vụ chạy ngầm (tự động cào dữ liệu, tự động huấn luyện lại model).
 
 ---
 
