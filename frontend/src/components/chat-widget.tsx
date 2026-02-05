@@ -101,7 +101,7 @@ export function ChatWidget() {
     }
 
     return (
-        <Card className="fixed bottom-6 right-6 w-96 h-[600px] shadow-2xl flex flex-col">
+        <Card className="fixed bottom-6 right-6 w-96 h-[600px] shadow-2xl flex flex-col overflow-hidden">
             <CardHeader className="flex flex-row items-center justify-between pb-3 border-b">
                 <div className="flex items-center gap-2">
                     <Sparkles className="h-5 w-5 text-primary" />
@@ -116,8 +116,8 @@ export function ChatWidget() {
                 </Button>
             </CardHeader>
 
-            <CardContent className="flex-1 flex flex-col p-0">
-                <div className="flex-1 p-4 overflow-y-auto" ref={scrollRef}>
+            <CardContent className="flex-1 flex flex-col p-0 min-h-0 overflow-hidden">
+                <div className="flex-1 p-4 overflow-y-auto min-h-0" ref={scrollRef}>
                     {messages.length === 0 && (
                         <div className="space-y-3">
                             <p className="text-sm text-muted-foreground mb-3">

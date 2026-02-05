@@ -138,23 +138,38 @@ Trả về JSON format:
                     result = json.loads(clean_response)
                 except json.JSONDecodeError:
                     # Fallback if regex found something that isn't valid JSON
-                    result = {"analysis": response, "estimated_price": ml_price or 0}
+                    result = {"analysis": response}
             else:
                 # No JSON found, use the raw response
-                result = {"analysis": response, "estimated_price": ml_price or 0}
+                result = {"analysis": response}
             
-            # 7. Add metadata
+            # 7. Add metadata and ensure fields exist for frontend
             if not isinstance(result, dict):
-                result = {"analysis": str(result), "estimated_price": ml_price or 0}
+                result = {"analysis": str(result)}
+            
+            # Fallback for price fields if missing from LLM response
+            if "price_suggested" not in result or not result["price_suggested"]:
+                result["price_suggested"] = ml_price or 0
+                
+            if "price_min" not in result or not result["price_min"]:
+                result["price_min"] = (ml_price * 0.9) if ml_price else 0
+                
+            if "price_max" not in result or not result["price_max"]:
+                result["price_max"] = (ml_price * 1.1) if ml_price else 0
+                
+            if "price_per_m2" not in result or not result["price_per_m2"]:
+                if ml_price and area_m2:
+                    result["price_per_m2"] = ml_price / area_m2
+                else:
+                    result["price_per_m2"] = 0
+            
+            if "confidence" not in result:
+                result["confidence"] = 70 if ml_price else 30
                 
             result["timestamp"] = datetime.now().isoformat()
             result["market_samples"] = len(market_data)
             result["district"] = district
             result["ml_estimate"] = ml_price
-            
-            # Ensure required fields exist for frontend
-            if "estimated_price" not in result:
-                result["estimated_price"] = ml_estimate if 'ml_estimate' in locals() else (ml_price or 0)
             
             logger.info(f"Valuation completed for {property_type} in {district}")
             return result
