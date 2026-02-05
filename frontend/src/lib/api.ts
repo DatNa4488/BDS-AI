@@ -100,7 +100,7 @@ export interface SearchResponse {
 }
 
 export interface PaginatedResponse<T> {
-  items: T[];
+  listings: T[]; // Renamed from items to match backend
   total: number;
   page: number;
   size: number;
@@ -235,7 +235,7 @@ export const getSearchHistory = async (limit = 20): Promise<SearchHistoryItem[]>
 };
 
 export const getValuationHistory = async (limit = 20): Promise<ValuationHistoryItem[]> => {
-  const { data } = await api.get("/api/valuation/history", { params: { limit } });
+  const { data } = await api.get("/api/v1/valuation/history", { params: { limit } });
   return data;
 };
 

@@ -19,7 +19,8 @@ from api.models import (
 )
 from agents.search_agent import RealEstateSearchAgent
 from storage.vector_db import semantic_search, get_vector_db
-from storage.database import get_session, ListingCRUD, SearchHistoryCRUD
+from storage.database import get_session, get_db, ListingCRUD, SearchHistoryCRUD
+from sqlalchemy.ext.asyncio import AsyncSession
 from services.validator import get_validator
 
 
@@ -402,21 +403,20 @@ async def get_search_stats():
 
 
 @router.get("/history")
-async def get_search_history(limit: int = 20, db = Depends(get_session)):
+async def get_search_history(limit: int = 20, db: AsyncSession = Depends(get_db)):
     """Get recent search history."""
     try:
-        async with db as session:
-            history = await SearchHistoryCRUD.list_by_user(session, limit=limit)
-            return [
-                {
-                    "id": h.id,
-                    "query": h.query,
-                    "filters": h.filters,
-                    "results_count": h.results_count,
-                    "created_at": h.created_at.isoformat()
-                }
-                for h in history
-            ]
+        history = await SearchHistoryCRUD.list_by_user(db, limit=limit)
+        return [
+            {
+                "id": h.id,
+                "query": h.query,
+                "filters": h.filters,
+                "results_count": h.results_count,
+                "created_at": h.created_at.isoformat()
+            }
+            for h in history
+        ]
     except Exception as e:
         logger.error(f"Error fetching search history: {e}")
         raise HTTPException(status_code=500, detail=str(e))

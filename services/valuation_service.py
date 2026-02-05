@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from services.llm_service import LLMService
-# from storage.database import get_db, Listing  <-- removed get_db usage
 from storage.database import Listing
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
@@ -129,15 +128,33 @@ Trả về JSON format:
             
             # 6. Parse JSON response
             import json
-            # Handle markdown code blocks if present
-            clean_response = response.replace("```json", "").replace("```", "").strip()
-            result = json.loads(clean_response)
+            import re
+            
+            # Extract JSON from response (handle markdown blocks or conversational padding)
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                try:
+                    clean_response = json_match.group(0)
+                    result = json.loads(clean_response)
+                except json.JSONDecodeError:
+                    # Fallback if regex found something that isn't valid JSON
+                    result = {"analysis": response, "estimated_price": ml_price or 0}
+            else:
+                # No JSON found, use the raw response
+                result = {"analysis": response, "estimated_price": ml_price or 0}
             
             # 7. Add metadata
+            if not isinstance(result, dict):
+                result = {"analysis": str(result), "estimated_price": ml_price or 0}
+                
             result["timestamp"] = datetime.now().isoformat()
             result["market_samples"] = len(market_data)
             result["district"] = district
-            result["ml_estimate"] = ml_price # Return raw ML estimate too
+            result["ml_estimate"] = ml_price
+            
+            # Ensure required fields exist for frontend
+            if "estimated_price" not in result:
+                result["estimated_price"] = ml_estimate if 'ml_estimate' in locals() else (ml_price or 0)
             
             logger.info(f"Valuation completed for {property_type} in {district}")
             return result

@@ -16,7 +16,7 @@ from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/valuation", tags=["valuation"])
+router = APIRouter(prefix="/valuation", tags=["valuation"])
 
 # Initialize valuation service
 valuation_service = AIValuationService()
@@ -145,26 +145,25 @@ async def get_available_districts(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/history")
-async def get_valuation_history(limit: int = 20, db = Depends(get_session)):
+async def get_valuation_history(limit: int = 20, db: AsyncSession = Depends(get_db)):
     """Get recent valuation history."""
     try:
-        async with db as session:
-            history = await ValuationHistoryCRUD.list_by_user(session, limit=limit)
-            return [
-                {
-                    "id": h.id,
-                    "property_type": h.property_type,
-                    "area_m2": h.area_m2,
-                    "district": h.district,
-                    "bedrooms": h.bedrooms,
-                    "price_suggested": h.price_suggested,
-                    "price_min": h.price_min,
-                    "price_max": h.price_max,
-                    "confidence": h.confidence,
-                    "created_at": h.created_at.isoformat()
-                }
-                for h in history
-            ]
+        history = await ValuationHistoryCRUD.list_by_user(db, limit=limit)
+        return [
+            {
+                "id": h.id,
+                "property_type": h.property_type,
+                "area_m2": h.area_m2,
+                "district": h.district,
+                "bedrooms": h.bedrooms,
+                "price_suggested": h.price_suggested,
+                "price_min": h.price_min,
+                "price_max": h.price_max,
+                "confidence": h.confidence,
+                "created_at": h.created_at.isoformat()
+            }
+            for h in history
+        ]
     except Exception as e:
         logger.error(f"Error fetching valuation history: {e}")
         raise HTTPException(status_code=500, detail=str(e))

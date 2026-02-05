@@ -68,9 +68,8 @@ class SearchIntent:
         area = data.get("area", {})
 
         # Sanitize city if LLM returns "Hà Nội | Hồ Chí Minh"
-        raw_city = location.get("city", "Hà Nội")
-        if raw_city and "|" in raw_city:
-            raw_city = raw_city.split("|")[0].strip()
+        # Always force Hà Nội
+        raw_city = "Hà Nội"
 
         return cls(
             property_type=data.get("property_type"),
@@ -246,7 +245,7 @@ Trả về CHÍNH XÁC JSON format (không có text khác):
 {{
     "property_type": "chung cư (hoặc nhà riêng, đất nền... CHỌN 1 LOẠI DUY NHẤT)",
     "location": {{
-        "city": "Hà Nội (hoặc Hồ Chí Minh, chọn 1)",
+        "city": "Hà Nội (mặc định)",
         "district": "tên quận/huyện hoặc null"
     }},
     "price": {{
@@ -261,13 +260,15 @@ Trả về CHÍNH XÁC JSON format (không có text khác):
 
 Lưu ý quan trọng:
 - 1 tỷ = 1000000000, 1 triệu = 1000000
-- Quận/Huyện Hà Nội: Cầu Giấy, Đống Đa, Ba Đình, Hoàn Kiếm, Thanh Xuân, Hai Bà Trưng, Long Biên, Tây Hồ, Nam Từ Liêm, Bắc Từ Liêm, Hà Đông, etc.
-- Quận TP.HCM: Quận 1, Quận 2, Quận 3, Bình Thạnh, Phú Nhuận, Gò Vấp, Thủ Đức, etc.
+- CHỈ TÌM KIẾM TẠI HÀ NỘI. Bỏ qua các địa danh TP.HCM.
+- Quận/Huyện Hà Nội: Cầu Giấy, Đống Đa, Ba Đình, Hoàn Kiếm, Thanh Xuân, Hai Bà Trưng, Long Biên, Tây Hồ, Nam Từ Liêm, Bắc Từ Liêm, Hà Đông, Hoàng Mai, Gia Lâm, Đông Anh, Thanh Trì, Hoài Đức, Đan Phượng, Mê Linh, Sóc Sơn, Thạch Thất, Quốc Oai, v.v.
 - NẾU query có tên quận/huyện, PHẢI điền vào "district"
-- KHÔN NGOAN: Map địa danh về Quận tương ứng. Ví dụ:
+- KHÔN NGOAN: Map địa danh về Quận tương ứng TẠI HÀ NỘI. Ví dụ:
   - "gần hồ Tây", "view hồ Tây" -> district: "Tây Hồ"
   - "gần bờ hồ", "phố cổ" -> district: "Hoàn Kiếm"
-  - "gần Landmark 81" -> district: "Bình Thạnh" (TP.HCM)
+  - "gần Mỹ Đình" -> district: "Nam Từ Liêm"
+  - "gần Royal City" -> district: "Thanh Xuân"
+  - "gần Times City" -> district: "Hai Bà Trưng"
 - "requirements" là các yêu cầu chi tiết khác ngoài giá/khu vực. Ví dụ:
   - "ngõ ô tô" -> ["ngõ ô tô", "ô tô đỗ"]
   - "kinh doanh tốt" -> ["kinh doanh"]

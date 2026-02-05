@@ -65,7 +65,7 @@ export default function ValuationPage() {
         setResult(null);
 
         try {
-            const response = await fetch("/api/valuation/estimate", {
+            const response = await fetch("/api/v1/valuation/estimate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({

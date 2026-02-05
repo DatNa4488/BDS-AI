@@ -167,8 +167,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(listings.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
-app.include_router(chat.router)
-app.include_router(valuation.router)
+app.include_router(chat.router, prefix="/api/v1")
+app.include_router(valuation.router, prefix="/api/v1")
 
 
 # Health check

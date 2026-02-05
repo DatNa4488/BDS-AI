@@ -3,7 +3,7 @@
 import { useSearchParams, useRouter } from "next/navigation";
 import { useState, useEffect, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, BarChart3 } from "lucide-react";
+import { Loader2, Search, Sparkles, Clock } from "lucide-react";
 import { Header, Footer } from "@/components/layout/header";
 import { SearchBox } from "@/components/search/search-box";
 import { FilterPanel, PROPERTY_TYPES } from "@/components/search/filter-panel";
@@ -13,18 +13,16 @@ import { searchListings, getSearchHistory, type SearchRequest } from "@/lib/api"
 import { formatDistanceToNow } from "date-fns";
 import { vi } from "date-fns/locale";
 
+
 function SearchContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const initialQuery = searchParams.get("q") || "";
 
-  const [activeTab, setActiveTab] = useState<"ai" | "history">("ai");
+  const [activeTab, setActiveTab] = useState<"search" | "history">("search");
   const [query, setQuery] = useState(initialQuery);
-  /* Manual Search Trigger Logic:
-   * 1. `filters` state matches the UI dropdowns (Pending)
-   * 2. `appliedFilters` matches what is sent to the API (Active)
-   * 3. `handleSearch` commits `filters` -> `appliedFilters`
-   */
+
+  /* Manual Search Trigger Logic: */
   const [filters, setFilters] = useState<{
     district?: string;
     property_type?: string;
@@ -74,7 +72,7 @@ function SearchContent() {
     search_realtime: true,
   };
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data: searchResults, isLoading, isError, error } = useQuery({
     queryKey: ["search", searchRequest],
     queryFn: () => searchListings(searchRequest),
     enabled: isSearchTriggered && !!searchRequest.query, // Only search if triggered AND valid query
@@ -82,15 +80,14 @@ function SearchContent() {
 
   const { data: historyItems, isLoading: historyLoading } = useQuery({
     queryKey: ["searchHistory"],
-    queryFn: () => getSearchHistory(),
+    queryFn: () => getSearchHistory(50),
     enabled: activeTab === "history",
   });
 
   // Sync AI-inferred filters to UI AND Applied State
-  // When AI returns new filters, we assume they are "accepted" until user changes them
   useEffect(() => {
-    if (data?.applied_filters) {
-      const af = data.applied_filters;
+    if (searchResults?.applied_filters) {
+      const af = searchResults.applied_filters;
       setFilters(prev => {
         const next = { ...prev };
         let changed = false;
@@ -111,212 +108,217 @@ function SearchContent() {
           next.price_max = af.max_price.toString();
           changed = true;
         }
+        if (af.min_area && prev.area_min !== af.min_area.toString()) {
+          next.area_min = af.min_area.toString();
+          changed = true;
+        }
+        if (af.max_area && prev.area_max !== af.max_area.toString()) {
+          next.area_max = af.max_area.toString();
+          changed = true;
+        }
 
         if (changed) {
-          // Also update applied filters to avoid double-search or state mismatch
           setAppliedFilters(next);
           return next;
         }
         return prev;
       });
     }
-  }, [data]);
+  }, [searchResults]);
 
+  // Handle Search Trigger
   const handleSearch = (newQuery: string) => {
     setQuery(newQuery);
     setAppliedFilters(filters); // Commit pending UI filters to active search
     setIsSearchTriggered(true); // Trigger search
+    setActiveTab("search"); // Switch to search tab if not already
   };
 
   const handleReset = () => {
     setQuery("");
-    setFilters({});
+    setFilters({
+      property_type: undefined,
+      price_min: undefined,
+      price_max: undefined,
+      area_min: undefined,
+      area_max: undefined,
+      district: undefined,
+    });
     setAppliedFilters({});
     setIsSearchTriggered(false); // Reset search trigger
     // Optional: Refresh query to default state if needed, but empty state usually handles it
   };
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col bg-slate-950">
       <Header />
 
       <main className="flex-1 container py-8">
-        {/* Tab Navigation */}
-        <div className="flex gap-2 mb-6 border-b">
-          <button
-            onClick={() => setActiveTab("ai")}
-            className={`px-4 py-2 font-medium transition-colors ${activeTab === "ai"
-              ? "border-b-2 border-primary text-primary"
-              : "text-muted-foreground hover:text-foreground"
-              }`}
-          >
-            Tìm kiếm AI
-          </button>
-          <button
-            onClick={() => setActiveTab("history")}
-            className={`px-4 py-2 font-medium transition-colors ${activeTab === "history"
-              ? "border-b-2 border-primary text-primary"
-              : "text-muted-foreground hover:text-foreground"
-              }`}
-          >
-            Lịch sử tìm kiếm
-          </button>
+        <div className="max-w-7xl mx-auto mb-8">
+          <div className="flex items-center gap-2 mb-2">
+            <Search className="h-8 w-8 text-blue-500" />
+            <h1 className="text-3xl font-bold text-white">Tìm kiếm thông minh</h1>
+          </div>
+          <p className="text-slate-400">Tìm kiếm bất động sản với AI và ngôn ngữ tự nhiên</p>
+
+          {/* Tabs */}
+          <div className="flex gap-2 mt-6 border-b border-white/10">
+            <button
+              onClick={() => setActiveTab("search")}
+              className={`px-4 py-2 font-medium transition-colors ${activeTab === "search"
+                ? "border-b-2 border-blue-500 text-blue-500"
+                : "text-slate-400 hover:text-white"
+                }`}
+            >
+              Tìm kiếm mới
+            </button>
+            <button
+              onClick={() => setActiveTab("history")}
+              className={`px-4 py-2 font-medium transition-colors ${activeTab === "history"
+                ? "border-b-2 border-blue-500 text-blue-500"
+                : "text-slate-400 hover:text-white"
+                }`}
+            >
+              Lịch sử tìm kiếm
+            </button>
+          </div>
         </div>
 
-        {/* AI Search Tab */}
-        {activeTab === "ai" && (
+        {activeTab === "search" ? (
           <>
-            <div className="mb-6">
-              <SearchBox
-                defaultValue={query}
-                onSearch={handleSearch}
-                onReset={handleReset}
-                placeholder="Nhập yêu cầu tìm kiếm của bạn..."
-              />
-            </div>
-
-            <div className="mb-6">
-              <FilterPanel
-                filters={filters}
-                onChange={setFilters}
-                onReset={() => setFilters({})}
-              />
-            </div>
-
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-semibold">
-                {(() => {
-                  // Dynamic Title Generation
-                  const isGenericQuery = !query || query.toLowerCase() === "bất động sản";
-                  if (isGenericQuery && (filters.district || filters.property_type)) {
-                    const typeLabel = PROPERTY_TYPES.find(t => t.value === filters.property_type)?.label || "Bất động sản";
-                    const districtLabel = filters.district ? `tại ${filters.district}` : "";
-                    return `Kết quả tìm kiếm ${typeLabel} ${districtLabel}`;
+            {/* Search Box & Filters */}
+            <div className="sticky top-16 z-30 bg-slate-950/80 backdrop-blur-md py-4 -mx-4 px-4 md:static md:bg-transparent md:p-0">
+              <div className="max-w-7xl mx-auto space-y-4">
+                <SearchBox
+                  defaultValue={query}
+                  onSearch={handleSearch}
+                  onReset={handleReset}
+                  placeholder="Nhập yêu cầu tìm kiếm của bạn..."
+                />
+                <FilterPanel
+                  filters={filters}
+                  onChange={setFilters} // Valid: updates "pending" UI state
+                  onReset={() =>
+                    setFilters({
+                      property_type: undefined,
+                      price_min: undefined,
+                      price_max: undefined,
+                      area_min: undefined,
+                      area_max: undefined,
+                      district: undefined,
+                    })
                   }
-                  return query ? `Kết quả tìm kiếm "${query}"` : "Nhập từ khóa để tìm kiếm";
-                })()}
-              </h2>
-              {data && (
-                <span className="text-muted-foreground">
-                  {data.total} kết quả ({data.execution_time_ms}ms)
-                </span>
+                />
+              </div>
+            </div>
+
+            {/* Results Section */}
+            <div className="mt-8">
+              {isError && (
+                <div className="rounded-lg bg-red-500/10 p-4 text-red-400 text-center">
+                  <p>Đã xảy ra lỗi: {(error as Error).message}</p>
+                </div>
+              )}
+
+              {isLoading && (
+                <div className="flex flex-col items-center justify-center py-20">
+                  <Loader2 className="h-10 w-10 animate-spin text-blue-500 mb-4" />
+                  <p className="text-slate-400 animate-pulse">AI đang phân tích yêu cầu tìm kiếm...</p>
+                </div>
+              )}
+
+              {/* Listings Grid */}
+              {!isLoading && searchResults?.results && searchResults.results.length > 0 && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                      <Sparkles className="h-5 w-5 text-yellow-400" />
+                      Kết quả tìm kiếm
+                    </h2>
+                    <span className="text-sm text-slate-400">
+                      Tìm thấy {searchResults.total} tin phù hợp ({searchResults.execution_time_ms}ms)
+                    </span>
+                  </div>
+
+                  <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                    {searchResults.results.map((listing: any) => (
+                      <ListingCard key={listing.id} listing={listing} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Initial Empty State */}
+              {!isSearchTriggered && !isLoading && !query && (
+                <div className="flex flex-col items-center justify-center py-12 opacity-50">
+                  <div className="bg-white/5 p-6 rounded-full mb-6 relative">
+                    <Search className="h-10 w-10 text-blue-400" />
+                    <Sparkles className="h-4 w-4 text-purple-400 absolute top-4 right-5 animate-pulse" />
+                  </div>
+                  <h3 className="text-xl font-medium text-slate-400">Nhập từ khóa để tìm kiếm</h3>
+                  <p className="text-sm text-slate-600 mt-2">Hệ thống AI sẽ tự động phân tích và tìm kiếm</p>
+                </div>
+              )}
+
+              {/* No Results State */}
+              {isSearchTriggered && !isLoading && searchResults?.results?.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-20">
+                  <div className="bg-white/5 p-6 rounded-full mb-4">
+                    <Search className="h-8 w-8 text-slate-500" />
+                  </div>
+                  <h3 className="text-lg font-medium text-slate-300">Không tìm thấy kết quả nào</h3>
+                  <p className="text-slate-500 mt-2">Hãy thử thay đổi từ khóa hoặc bộ lọc tìm kiếm</p>
+                </div>
               )}
             </div>
-
-            {isLoading && (
-              <div className="flex flex-col items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <p className="mt-4 text-muted-foreground">
-                  AI đang tìm kiếm trên các nền tảng...
-                </p>
-              </div>
-            )}
-
-            {isError && (
-              <div className="text-center py-12">
-                <p className="text-destructive">Đã xảy ra lỗi: {(error as Error).message}</p>
-              </div>
-            )}
-
-            {!isLoading && query && data?.results?.length === 0 && (
-              <div className="text-center py-12">
-                <p className="text-muted-foreground">
-                  Không tìm thấy kết quả phù hợp. Thử thay đổi từ khóa hoặc bộ lọc.
-                </p>
-              </div>
-            )}
-
-            {data?.results && data.results.length > 0 && (
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {data.results.map((listing) => (
-                  <ListingCard key={listing.id} listing={listing} />
-                ))}
-              </div>
-            )}
-
-            {!query && !isLoading && (
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <ListingCardSkeleton key={i} />
-                ))}
-              </div>
-            )}
           </>
-        )}
-
-        {/* History Tab */}
-        {activeTab === "history" && (
-          <div className="max-w-4xl mx-auto py-8">
-            <div className="flex items-center gap-2 mb-6">
-              <BarChart3 className="h-6 w-6 text-primary" />
-              <h2 className="text-2xl font-bold">Lịch sử tìm kiếm</h2>
-            </div>
-
+        ) : (
+          <div className="max-w-3xl mx-auto mt-8">
             {historyLoading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <div className="space-y-4">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="h-16 bg-white/5 rounded-xl animate-pulse" />
+                ))}
               </div>
             ) : historyItems && historyItems.length > 0 ? (
               <div className="space-y-4">
                 {historyItems.map((item: any) => (
                   <div
                     key={item.id}
-                    className="p-4 border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer group"
-                    onClick={() => {
-                      setQuery(item.query);
-                      // Merging filters if any
-                      if (item.filters) {
-                        setFilters({
-                          district: item.filters.district,
-                          property_type: item.filters.property_type,
-                          price_min: item.filters.price_min?.toString(),
-                          price_max: item.filters.price_max?.toString(),
-                        });
-                      }
-                      setActiveTab("ai");
-                      setIsSearchTriggered(true);
-                    }}
+                    className="group flex items-center justify-between p-4 rounded-xl bg-slate-900/50 border border-white/5 hover:border-blue-500/30 hover:bg-blue-500/5 transition-all"
                   >
-                    <div className="flex justify-between items-start mb-1">
-                      <h4 className="font-semibold text-lg line-clamp-1 group-hover:text-primary transition-colors">
-                        {item.query}
-                      </h4>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        {formatDistanceToNow(new Date(item.created_at), { addSuffix: true, locale: vi })}
-                      </span>
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 rounded-lg bg-white/5 group-hover:bg-blue-500/20 text-slate-400 group-hover:text-blue-400 transition-colors">
+                        <Search className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-lg text-slate-200 group-hover:text-blue-200 transition-colors">
+                          {item.query || "Tìm kiếm không tên"}
+                        </p>
+                        <div className="flex items-center gap-3 text-sm text-slate-500 mt-1">
+                          <span>
+                            {formatDistanceToNow(new Date(item.created_at), { addSuffix: true, locale: vi })}
+                          </span>
+                          <span>•</span>
+                          <span>{item.results_count} kết quả</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-sm text-muted-foreground flex gap-3">
-                      <span>{item.results_count} kết quả</span>
-                      {item.filters?.district && (
-                        <span className="px-2 py-0.5 bg-secondary text-secondary-foreground rounded text-xs">
-                          {item.filters.district}
-                        </span>
-                      )}
-                      {item.filters?.property_type && (
-                        <span className="px-2 py-0.5 bg-secondary text-secondary-foreground rounded text-xs">
-                          {PROPERTY_TYPES.find(t => t.value === item.filters.property_type)?.label || item.filters.property_type}
-                        </span>
-                      )}
-                    </div>
+                    {/* User requested ONLY showing queries, not re-search. So no click handler on the whole row to simple set query. 
+                               But leaving it non-interactive might feel broken. 
+                               "lịch sử tìm kiếm o cần tìm kiếm lại chỉ cần hiện các query đã tìm kiếm thôi"
+                               I will just display them. Maybe a copy button? Nah, just list is fine as requested.
+                           */}
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-center py-12">
-                <div className="flex flex-col items-center justify-center p-8 border border-dashed rounded-lg bg-muted/50">
-                  <BarChart3 className="h-12 w-12 text-muted-foreground mb-4" />
-                  <h3 className="text-lg font-medium text-foreground">Chưa có lịch sử</h3>
-                  <p className="text-muted-foreground mt-2 max-w-sm">
-                    Các tìm kiếm mới nhất của bạn sẽ xuất hiện tại đây.
-                  </p>
-                  <Button
-                    variant="outline"
-                    className="mt-4"
-                    onClick={() => setActiveTab("ai")}
-                  >
-                    Bắt đầu tìm kiếm ngay
-                  </Button>
-                </div>
+              <div className="text-center py-12 bg-white/5 rounded-xl border border-white/5">
+                <Clock className="h-12 w-12 text-slate-600 mx-auto mb-4" />
+                <p className="text-slate-400">Bạn chưa có lịch sử tìm kiếm nào.</p>
+                <Button variant="link" onClick={() => setActiveTab("search")} className="mt-2 text-blue-400">
+                  Bắt đầu tìm kiếm ngay
+                </Button>
               </div>
             )}
           </div>

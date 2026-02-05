@@ -48,7 +48,7 @@ export function ChatWidget() {
         setIsLoading(true);
 
         try {
-            const response = await fetch("/api/chat/message", {
+            const response = await fetch("/api/v1/chat/message", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -148,7 +148,7 @@ export function ChatWidget() {
                                     : "bg-muted"
                                     }`}
                             >
-                                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                                <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
                             </div>
                         </div>
                     ))}

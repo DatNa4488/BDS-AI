@@ -67,7 +67,7 @@ export function FilterPanel({ filters, onChange, onReset }: FilterPanelProps) {
   const hasFilters = Object.values(filters).some((v) => v);
 
   return (
-    <div className="space-y-4 p-4 border rounded-lg bg-card">
+    <div className="space-y-4 p-6 border border-white/5 rounded-xl bg-slate-900/50 backdrop-blur-md shadow-xl">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 font-medium">
           <Filter className="h-4 w-4" />

@@ -17,6 +17,7 @@ import { useState } from "react";
 
 const navItems = [
   { href: "/", label: "Trang chủ", icon: Home },
+  { href: "/listings", label: "Tin đăng", icon: LayoutList },
   { href: "/search", label: "Tìm kiếm", icon: Search },
   { href: "/valuation", label: "Định giá AI", icon: Calculator },
   { href: "/analytics", label: "Phân tích", icon: BarChart3 },
@@ -27,12 +28,14 @@ export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container flex h-14 items-center">
+    <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-slate-950/70 backdrop-blur-xl supports-[backdrop-filter]:bg-slate-950/40 shadow-sm transition-all duration-300">
+      <div className="container flex h-16 items-center">
         {/* Logo */}
-        <Link href="/" className="mr-6 flex items-center space-x-2">
-          <Home className="h-6 w-6 text-primary" />
-          <span className="font-bold hidden sm:inline-block">BDS Agent</span>
+        <Link href="/" className="mr-8 flex items-center space-x-2 group">
+          <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-1.5 rounded-lg shadow-lg group-hover:shadow-blue-500/50 transition-all duration-300">
+            <Home className="h-5 w-5 text-white" />
+          </div>
+          <span className="font-bold hidden sm:inline-block text-lg bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400 group-hover:to-white transition-all">BDS Agent</span>
         </Link>
 
         {/* Desktop Nav */}
@@ -42,6 +45,12 @@ export function Header() {
             className="text-sm font-medium transition-colors hover:text-primary"
           >
             Trang chủ
+          </Link>
+          <Link
+            href="/listings"
+            className="text-sm font-medium transition-colors hover:text-primary"
+          >
+            Tin đăng
           </Link>
           <Link
             href="/search"
@@ -112,10 +121,10 @@ export function Header() {
 
 export function Footer() {
   return (
-    <footer className="border-t py-6 md:py-0">
+    <footer className="border-t border-white/5 py-8 md:py-0 bg-slate-950">
       <div className="container flex flex-col items-center justify-between gap-4 md:h-14 md:flex-row">
         <p className="text-sm text-muted-foreground">
-          © 2024 BDS Agent. Hệ thống tìm kiếm BĐS thông minh với AI.
+          © 2026 BDS Agent. Hệ thống tìm kiếm BĐS thông minh với AI.
         </p>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <Link href="/about" className="hover:text-foreground">

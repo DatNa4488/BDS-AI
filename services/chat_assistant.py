@@ -10,12 +10,12 @@ This service provides RAG-based conversational AI to help users with:
 
 from typing import List, Dict, Optional
 import logging
-from datetime import datetime
 
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_ollama import ChatOllama
 
-from services.llm_service import LLMService
-from storage.vector_store import VectorStoreService
+from storage.vector_db import semantic_search
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -23,22 +23,23 @@ logger = logging.getLogger(__name__)
 class ChatAssistant:
     """AI Chat Assistant for real estate consultation."""
     
-    SYSTEM_PROMPT = """Bạn là trợ lý AI chuyên về bất động sản tại Hà Nội, Việt Nam.
+    SYSTEM_PROMPT = """Bạn là trợ lý AI thân thiện và hữu ích có khả năng:
 
-Nhiệm vụ của bạn:
-1. Tư vấn mua/bán nhà đất dựa trên ngân sách và nhu cầu của khách hàng
-2. Giải thích các thuật ngữ bất động sản (sổ hồng, sổ đỏ, pháp lý, v.v.)
-3. So sánh các khu vực/quận khác nhau về giá cả, tiện ích
-4. Phân tích xu hướng thị trường dựa trên dữ liệu thực
+1. **Trả lời câu hỏi chung**: Bạn có thể trò chuyện về nhiều chủ đề khác nhau (thời tiết, công nghệ, cuộc sống hàng ngày, v.v.)
+
+2. **Tư vấn bất động sản**: Khi được hỏi về BĐS tại Hà Nội, bạn sẽ dựa vào dữ liệu thực từ hệ thống để:
+   - Tư vấn mua/bán nhà đất dựa trên ngân sách
+   - Giải thích thuật ngữ bất động sản (sổ hồng, sổ đỏ, pháp lý...)
+   - So sánh các quận/khu vực về giá cả, tiện ích
+   - Phân tích xu hướng thị trường
 
 Quy tắc:
-- Luôn trả lời bằng tiếng Việt
-- Dựa trên dữ liệu thực từ hệ thống (được cung cấp trong context)
-- Nếu không chắc chắn, hãy nói rõ và đề xuất tìm kiếm thêm
-- Gợi ý hành động cụ thể (xem tin đăng, lưu tìm kiếm)
-- Giữ câu trả lời ngắn gọn, dễ hiểu (2-3 đoạn văn)
+- Luôn trả lời bằng tiếng Việt, thân thiện và dễ hiểu
+- Nếu không chắc chắn, hãy thừa nhận và đề xuất cách tìm thêm
+- Khi có context BĐS, ưu tiên dựa vào dữ liệu thực
+- Giữ câu trả lời ngắn gọn (2-3 đoạn văn)
 
-Context từ database:
+Context từ database BĐS (nếu có):
 {context}
 
 Lịch sử hội thoại:
@@ -47,8 +48,11 @@ Lịch sử hội thoại:
 
     def __init__(self):
         """Initialize chat assistant."""
-        self.llm_service = LLMService()
-        self.vector_store = VectorStoreService()
+        self.llm = ChatOllama(
+            model=settings.ollama_model,
+            base_url=settings.ollama_base_url,
+            temperature=0.7
+        )
         
     async def get_response(
         self,
@@ -68,7 +72,7 @@ Lịch sử hội thoại:
             AI-generated response
         """
         try:
-            # 1. Retrieve relevant context from vector store
+            # 1. Try to retrieve relevant context from vector DB (real estate queries)
             context = await self._get_relevant_context(user_message)
             
             # 2. Format chat history
@@ -86,16 +90,16 @@ Lịch sử hội thoại:
                 HumanMessage(content=user_message)
             ]
             
-            response = await self.llm_service.chat(messages)
+            response = self.llm.invoke(messages)
             
             logger.info(f"Chat response generated for user {user_id}")
-            return response
+            return response.content
             
         except Exception as e:
             logger.error(f"Error generating chat response: {e}")
-            return "Xin lỗi, tôi gặp sự cố khi xử lý câu hỏi của bạn. Vui lòng thử lại sau."
+            return f"Xin lỗi, tôi gặp sự cố khi xử lý câu hỏi của bạn: {str(e)}"
     
-    async def _get_relevant_context(self, query: str, top_k: int = 5) -> str:
+    async def _get_relevant_context(self, query: str, top_k: int = 3) -> str:
         """
         Retrieve relevant listings/data from vector store.
         
@@ -107,29 +111,36 @@ Lịch sử hội thoại:
             Formatted context string
         """
         try:
-            # Search vector store for relevant listings
-            results = await self.vector_store.search(query, limit=top_k)
+            # Check if query is related to real estate
+            real_estate_keywords = ['nhà', 'bds', 'bất động sản', 'chung cư', 'căn hộ', 
+                                   'giá', 'mua', 'bán', 'quận', 'phòng', 'tỷ']
+            is_re_query = any(keyword in query.lower() for keyword in real_estate_keywords)
+            
+            if not is_re_query:
+                return "Không có dữ liệu BĐS liên quan."
+            
+            # Search vector DB for relevant listings
+            results = await semantic_search(query, n_results=top_k)
             
             if not results:
-                return "Không tìm thấy dữ liệu liên quan trong hệ thống."
+                return "Không tìm thấy dữ liệu BĐS phù hợp trong hệ thống."
             
             # Format results as context
             context_parts = []
             for i, result in enumerate(results, 1):
-                metadata = result.get('metadata', {})
                 context_parts.append(
-                    f"{i}. {metadata.get('title', 'N/A')}\n"
-                    f"   - Giá: {metadata.get('price_text', 'N/A')}\n"
-                    f"   - Diện tích: {metadata.get('area_m2', 'N/A')} m²\n"
-                    f"   - Quận: {metadata.get('district', 'N/A')}\n"
-                    f"   - Loại: {metadata.get('property_type', 'N/A')}"
+                    f"{i}. {result.get('title', 'N/A')}\n"
+                    f"   - Giá: {result.get('price_text', 'N/A')}\n"
+                    f"   - Diện tích: {result.get('area_m2', 'N/A')} m²\n"
+                    f"   - Quận: {result.get('district', 'N/A')}\n"
+                    f"   - Loại: {result.get('property_type', 'N/A')}"
                 )
             
             return "\n\n".join(context_parts)
             
         except Exception as e:
-            logger.error(f"Error retrieving context: {e}")
-            return "Không thể truy xuất dữ liệu từ hệ thống."
+            logger.warning(f"Error retrieving context (non-critical): {e}")
+            return "Không có dữ liệu BĐS liên quan."
     
     def _format_chat_history(self, history: List[Dict[str, str]]) -> str:
         """
