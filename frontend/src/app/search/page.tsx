@@ -150,7 +150,7 @@ function SearchContent() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-950">
+    <div className="flex min-h-screen flex-col">
       <Header />
 
       <main className="flex-1 container py-8">
@@ -186,8 +186,7 @@ function SearchContent() {
 
         {activeTab === "search" ? (
           <>
-            {/* Search Box & Filters */}
-            <div className="sticky top-16 z-30 bg-slate-950/80 backdrop-blur-md py-4 -mx-4 px-4 md:static md:bg-transparent md:p-0">
+            <div className="sticky top-16 z-30 bg-background/40 backdrop-blur-md py-4 -mx-4 px-4 md:static md:bg-transparent md:p-0">
               <div className="max-w-7xl mx-auto space-y-4">
                 <SearchBox
                   defaultValue={query}

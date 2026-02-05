@@ -55,7 +55,7 @@ export default function ListingsPage() {
   const totalPages = (data as any)?.pages || Math.ceil(total / 20) || 1;
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-950">
+    <div className="flex min-h-screen flex-col">
       <Header />
       <main className="flex-1 container py-8">
         <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4">

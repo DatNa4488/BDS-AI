@@ -151,5 +151,5 @@ npm run dev
 
 ---
 
-**Phát triển bởi**: Antigravity Team
+**Phát triển bởi**: NHÓM 5 - VSMAC 
 
