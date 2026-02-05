@@ -19,7 +19,7 @@ from api.models import (
 )
 from agents.search_agent import RealEstateSearchAgent
 from storage.vector_db import semantic_search, get_vector_db
-from storage.database import get_session, ListingCRUD
+from storage.database import get_session, ListingCRUD, SearchHistoryCRUD
 from services.validator import get_validator
 
 
@@ -89,23 +89,49 @@ async def search_listings(request: SearchRequest) -> SearchResponse:
     synthesis = None
 
     try:
+        # Pre-parsing: Extract intent from query to improve cache relevance
+        # We need to know the district/city to filter vector DB results correctly
+        parsed_intent = None
+        
+        # Instantiate agent in headless mode for parsing
+        # (Lightweight init, LLM loads lazily)
+        parsing_agent = RealEstateSearchAgent(headless=True)
+        try:
+            parsed_intent = await parsing_agent.parse_query(request.query)
+            logger.info(f"🧠 Early intent parsing: {parsed_intent}")
+        except Exception as e:
+            logger.warning(f"Failed to parse intent early: {e}")
+
         # Build filters for vector search
         filters = {}
+        
+        # Priority: Request Filters > Parsed Intent
         if request.filters:
-            if request.filters.property_type:
-                filters["property_type"] = request.filters.property_type
-            if request.filters.district:
-                filters["district"] = request.filters.district
-            if request.filters.min_price:
-                filters["price_min"] = request.filters.min_price
-            if request.filters.max_price:
-                filters["price_max"] = request.filters.max_price
-            if request.filters.bedrooms:
-                filters["bedrooms"] = request.filters.bedrooms
-            if request.filters.source_platform:
-                filters["source_platform"] = request.filters.source_platform
+            if request.filters.property_type: filters["property_type"] = request.filters.property_type
+            if request.filters.district: filters["district"] = request.filters.district
+            if request.filters.min_price: filters["price_min"] = request.filters.min_price
+            if request.filters.max_price: filters["price_max"] = request.filters.max_price
+            if request.filters.bedrooms: filters["bedrooms"] = request.filters.bedrooms
+            if request.filters.source_platform: filters["source_platform"] = request.filters.source_platform
+            
+        # Backfill from parsed intent if filters are missing
+        if parsed_intent:
+            if "district" not in filters and parsed_intent.district:
+                filters["district"] = parsed_intent.district
+            if "property_type" not in filters and parsed_intent.property_type:
+                filters["property_type"] = parsed_intent.property_type
+            if "bedrooms" not in filters and parsed_intent.bedrooms:
+                filters["bedrooms"] = parsed_intent.bedrooms
+            if "price_min" not in filters and parsed_intent.price_min:
+                filters["price_min"] = parsed_intent.price_min
+            if "price_max" not in filters and parsed_intent.price_max:
+                filters["price_max"] = parsed_intent.price_max
 
         # Step 1: Search vector DB
+        # Always search cached results, but filter by district to ensure relevance
+        if parsed_intent and parsed_intent.district:
+             logger.info(f"🔍 Vector Search with enforced district: {parsed_intent.district}")
+        
         vector_results = await semantic_search(
             request.query,
             n_results=request.max_results,
@@ -126,10 +152,12 @@ async def search_listings(request: SearchRequest) -> SearchResponse:
             # Use visible browser (headless=False) for debugging
             agent = RealEstateSearchAgent(headless=False)
             try:
+                # Pass the already parsed intent to avoid re-parsing
                 search_result = await agent.search(
                     request.query,
                     max_results=request.max_results,
                     platforms=request.platforms or ["chotot", "batdongsan"],
+                    intent=parsed_intent # Pass optimized intent
                 )
 
                 sources.extend(search_result.sources_searched)
@@ -189,6 +217,29 @@ async def search_listings(request: SearchRequest) -> SearchResponse:
             finally:
                 await agent.close()
 
+        # Step 3: Local Data Fallback (If scraping matched nothing)
+        # If we have 0 results but we know the district, search Vector DB for that district ignoring other keywords
+        if not results and parsed_intent and parsed_intent.district:
+            logger.info(f"⚠️ Scraping yielded 0 results. Triggering fallback for district: {parsed_intent.district}")
+            
+            fallback_filters = {"district": parsed_intent.district}
+            if parsed_intent.property_type:
+                fallback_filters["property_type"] = parsed_intent.property_type
+
+            # Search widely in that district
+            fallback_results = await semantic_search(
+                query=parsed_intent.district, # Query is just the district name for broad match
+                n_results=request.max_results,
+                filters=fallback_filters
+            )
+            
+            if fallback_results:
+                logger.info(f"✅ Fallback found {len(fallback_results)} cached listings in {parsed_intent.district}")
+                sources.append("vector_db_fallback")
+                synthesis = f"Không tìm thấy kết quả mới nhất. Dưới đây là các tin đăng đã lưu tại {parsed_intent.district}."
+                for r in fallback_results:
+                    results.append(listing_to_search_result(r))
+
         # Deduplicate by ID
         seen_ids = set()
         unique_results = []
@@ -205,7 +256,7 @@ async def search_listings(request: SearchRequest) -> SearchResponse:
 
     execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
 
-    return SearchResponse(
+    response = SearchResponse(
         results=results,
         total=len(results),
         from_cache=from_cache,
@@ -213,7 +264,22 @@ async def search_listings(request: SearchRequest) -> SearchResponse:
         execution_time_ms=execution_time,
         synthesis=synthesis,
         errors=errors,
+        applied_filters=filters,
     )
+
+    # Record search history (Background task or just await)
+    try:
+        async with get_session() as session:
+            await SearchHistoryCRUD.create(session, {
+                "query": request.query,
+                "filters": filters,
+                "results_count": len(results),
+                "user_id": None # Connect when auth is implemented
+            })
+    except Exception as e:
+        logger.warning(f"Failed to record search history: {e}")
+
+    return response
 
 
 @router.get("/quick")
@@ -333,3 +399,24 @@ async def get_search_stats():
     db = get_vector_db()
     stats = await db.get_stats()
     return stats
+
+
+@router.get("/history")
+async def get_search_history(limit: int = 20, db = Depends(get_session)):
+    """Get recent search history."""
+    try:
+        async with db as session:
+            history = await SearchHistoryCRUD.list_by_user(session, limit=limit)
+            return [
+                {
+                    "id": h.id,
+                    "query": h.query,
+                    "filters": h.filters,
+                    "results_count": h.results_count,
+                    "created_at": h.created_at.isoformat()
+                }
+                for h in history
+            ]
+    except Exception as e:
+        logger.error(f"Error fetching search history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

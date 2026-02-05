@@ -275,6 +275,22 @@ async def health_check_job():
     logger.debug("Health check: scheduler is running")
 
 
+async def train_valuation_model_job():
+    """
+    Train AutoGluon valuation model.
+    Runs daily.
+    """
+    from storage.database import get_session
+    from services.valuation_service import valuation_service
+
+    logger.info("Starting train_valuation_model job...")
+
+    async with get_session() as session:
+        result = await valuation_service.ml_service.train_model(session)
+    
+    logger.info(f"Training job completed: {result}")
+
+
 # ============================================================================
 # Scheduler Management
 # ============================================================================
@@ -303,6 +319,16 @@ def setup_jobs():
         replace_existing=True,
     )
     logger.info("Scheduled cleanup_old_data daily at 3:00 AM")
+
+    # Training job - daily at 2 AM
+    scheduler.add_job(
+        train_valuation_model_job,
+        trigger=CronTrigger(hour=2, minute=0),
+        id="train_valuation_model",
+        name="Train Valuation Model",
+        replace_existing=True,
+    )
+    logger.info("Scheduled train_valuation_model daily at 2:00 AM")
 
     # Notification job - every hour
     scheduler.add_job(
@@ -387,6 +413,8 @@ async def trigger_job(job_id: str) -> bool:
         await cleanup_old_data_job()
     elif job_id == "notify_new_listings":
         await notify_new_listings_job()
+    elif job_id == "train_valuation_model":
+        await train_valuation_model_job()
     else:
         return False
 

@@ -27,6 +27,7 @@ from sqlalchemy import (
     update,
     delete,
 )
+from sqlalchemy import case
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     create_async_engine,
@@ -81,6 +82,11 @@ async def get_session() -> AsyncSession:
         finally:
             await session.close()
 
+
+async def get_db():
+    """Get async database session (generator for Depends)."""
+    async with async_session_factory() as session:
+        yield session
 
 async def init_db():
     """Initialize database - create all tables."""
@@ -316,6 +322,33 @@ class User(Base):
     )
 
 
+class ChatHistory(Base):
+    """Chat history for AI assistant conversations."""
+
+    __tablename__ = "chat_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Session info
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"))
+    session_id: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    # Message
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # 'user' or 'assistant'
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Timestamp
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_chat_session", "session_id"),
+        Index("idx_chat_user", "user_id"),
+        Index("idx_chat_created", "created_at"),
+    )
+
+
+
 class SavedSearch(Base):
     """Saved search for alerts."""
 
@@ -420,9 +453,108 @@ class ScrapeLog(Base):
     )
 
 
+class SearchHistory(Base):
+    """Log of user search queries."""
+
+    __tablename__ = "search_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"))
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    filters: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    results_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_search_history_user", "user_id"),
+        Index("idx_search_history_created", "created_at"),
+    )
+
+
+class ValuationHistory(Base):
+    """Log of user property valuation requests."""
+
+    __tablename__ = "valuation_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"))
+    
+    # Property info
+    property_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    area_m2: Mapped[float] = mapped_column(Float, nullable=False)
+    district: Mapped[str] = mapped_column(String(100), nullable=False)
+    bedrooms: Mapped[Optional[int]] = mapped_column(Integer)
+    direction: Mapped[Optional[str]] = mapped_column(String(50))
+    legal_status: Mapped[Optional[str]] = mapped_column(String(100))
+    
+    # Result info
+    price_suggested: Mapped[Optional[BigInteger]] = mapped_column(BigInteger)
+    price_min: Mapped[Optional[BigInteger]] = mapped_column(BigInteger)
+    price_max: Mapped[Optional[BigInteger]] = mapped_column(BigInteger)
+    confidence: Mapped[Optional[int]] = mapped_column(Integer)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_valuation_history_user", "user_id"),
+        Index("idx_valuation_history_created", "created_at"),
+    )
+
+
 # ============================================================================
 # CRUD Operations
 # ============================================================================
+
+class SearchHistoryCRUD:
+    """CRUD operations for SearchHistory model."""
+
+    @staticmethod
+    async def create(session: AsyncSession, data: dict) -> SearchHistory:
+        """Create a search history entry."""
+        entry = SearchHistory(**data)
+        session.add(entry)
+        await session.flush()
+        return entry
+
+    @staticmethod
+    async def list_by_user(
+        session: AsyncSession,
+        user_id: Optional[int] = None,
+        limit: int = 20
+    ) -> list[SearchHistory]:
+        """List search history entries."""
+        query = select(SearchHistory).order_by(SearchHistory.created_at.desc()).limit(limit)
+        if user_id:
+            query = query.where(SearchHistory.user_id == user_id)
+        
+        result = await session.execute(query)
+        return list(result.scalars().all())
+
+
+class ValuationHistoryCRUD:
+    """CRUD operations for ValuationHistory model."""
+
+    @staticmethod
+    async def create(session: AsyncSession, data: dict) -> ValuationHistory:
+        """Create a valuation history entry."""
+        entry = ValuationHistory(**data)
+        session.add(entry)
+        await session.flush()
+        return entry
+
+    @staticmethod
+    async def list_by_user(
+        session: AsyncSession,
+        user_id: Optional[int] = None,
+        limit: int = 20
+    ) -> list[ValuationHistory]:
+        """List valuation history entries."""
+        query = select(ValuationHistory).order_by(ValuationHistory.created_at.desc()).limit(limit)
+        if user_id:
+            query = query.where(ValuationHistory.user_id == user_id)
+        
+        result = await session.execute(query)
+        return list(result.scalars().all())
 
 class ListingCRUD:
     """CRUD operations for Listing model."""
@@ -565,6 +697,16 @@ class ListingCRUD:
         return result.scalar_one()
 
     @staticmethod
+    async def get_by_url(session: AsyncSession, url: str) -> Optional[Listing]:
+        """Get listing by source URL."""
+        if not url:
+            return None
+        result = await session.execute(
+            select(Listing).where(Listing.source_url == url)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
     async def upsert(session: AsyncSession, data: dict) -> tuple[Listing, bool]:
         """
         Insert or update listing.
@@ -574,6 +716,10 @@ class ListingCRUD:
         """
         listing_id = data.get("id")
         existing = await ListingCRUD.get_by_id(session, listing_id)
+        
+        # Check by URL if not found by ID to prevent duplicates
+        if not existing and data.get("source_url"):
+            existing = await ListingCRUD.get_by_url(session, data["source_url"])
 
         if existing:
             # Update
@@ -585,8 +731,22 @@ class ListingCRUD:
             return existing, False
         else:
             # Create
-            listing = await ListingCRUD.create(session, data)
-            return listing, True
+            try:
+                listing = await ListingCRUD.create(session, data)
+                return listing, True
+            except Exception as e:
+                # Double check race condition
+                if "duplicate key" in str(e).lower() and data.get("source_url"):
+                     existing = await ListingCRUD.get_by_url(session, data["source_url"])
+                     if existing:
+                         # Retry update
+                         for key, value in data.items():
+                            if hasattr(existing, key) and key != "id":
+                                setattr(existing, key, value)
+                         existing.updated_at = datetime.utcnow()
+                         await session.flush()
+                         return existing, False
+                raise e
 
     @staticmethod
     async def get_by_phone(
@@ -789,21 +949,22 @@ class ScrapeLogCRUD:
 
         result = await session.execute(
             select(
-                func.count(ScrapeLog.id).label("total_runs"),
-                func.sum(ScrapeLog.listings_found).label("total_found"),
-                func.sum(ScrapeLog.listings_new).label("total_new"),
-                func.avg(ScrapeLog.duration_seconds).label("avg_duration"),
+                func.count(ScrapeLog.id).label("total_scrapes"),
+                func.sum(case((ScrapeLog.status == "completed", 1), else_=0)).label("successful_scrapes"),
+                func.sum(ScrapeLog.listings_found).label("total_listings_found"),
+                func.sum(ScrapeLog.listings_new).label("total_new_listings"),
+                func.avg(ScrapeLog.duration_seconds).label("avg_duration_seconds"),
             )
             .where(ScrapeLog.started_at >= threshold)
-            .where(ScrapeLog.status == "completed")
         )
 
         row = result.one()
 
         return {
-            "total_runs": row.total_runs or 0,
-            "total_found": row.total_found or 0,
-            "total_new": row.total_new or 0,
-            "avg_duration": round(row.avg_duration or 0, 2),
+            "total_scrapes": row.total_scrapes or 0,
+            "successful_scrapes": row.successful_scrapes or 0,
+            "total_listings_found": row.total_listings_found or 0,
+            "total_new_listings": row.total_new_listings or 0,
+            "avg_duration_seconds": round(row.avg_duration_seconds or 0, 2),
             "period_days": days,
         }

@@ -87,6 +87,16 @@ export interface SearchResponse {
   execution_time_ms: number;
   synthesis?: string;
   errors?: string[];
+  applied_filters?: {
+    district?: string;
+    property_type?: string;
+    min_price?: number;
+    max_price?: number;
+    min_area?: number;
+    max_area?: number;
+    bedrooms?: number;
+    bathrooms?: number;
+  };
 }
 
 export interface PaginatedResponse<T> {
@@ -119,6 +129,27 @@ export interface District {
     max: number;
     display: string;
   };
+}
+
+export interface SearchHistoryItem {
+  id: number;
+  query: string;
+  filters: Record<string, any>;
+  results_count: number;
+  created_at: string;
+}
+
+export interface ValuationHistoryItem {
+  id: number;
+  property_type: string;
+  area_m2: number;
+  district: string;
+  bedrooms?: number;
+  price_suggested?: number;
+  price_min?: number;
+  price_max?: number;
+  confidence?: number;
+  created_at: string;
 }
 
 // API functions
@@ -195,5 +226,20 @@ export const getPropertyTypes = async (): Promise<{ property_types: Record<strin
 
 export const getHealth = async (): Promise<{ status: string; services: Record<string, string> }> => {
   const { data } = await api.get("/health");
+  return data;
+};
+
+export const getSearchHistory = async (limit = 20): Promise<SearchHistoryItem[]> => {
+  const { data } = await api.get("/api/v1/search/history", { params: { limit } });
+  return data;
+};
+
+export const getValuationHistory = async (limit = 20): Promise<ValuationHistoryItem[]> => {
+  const { data } = await api.get("/api/valuation/history", { params: { limit } });
+  return data;
+};
+
+export const estimatePrice = async (params: any): Promise<any> => {
+  const { data } = await api.post("/api/valuation/estimate", params);
   return data;
 };

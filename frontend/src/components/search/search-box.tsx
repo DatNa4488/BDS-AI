@@ -12,22 +12,17 @@ interface SearchBoxProps {
   placeholder?: string;
   defaultValue?: string;
   onSearch?: (query: string) => void;
+  onReset?: () => void;
   size?: "default" | "lg";
   showAIBadge?: boolean;
 }
-
-const EXAMPLE_QUERIES = [
-  "Nhà 3 tầng Cầu Giấy dưới 5 tỷ",
-  "Chung cư 2 phòng ngủ gần hồ Tây",
-  "Đất nền Long Biên 50-80m2",
-  "Biệt thự Thanh Xuân có gara",
-];
 
 export function SearchBox({
   className,
   placeholder = "Tìm kiếm bất động sản...",
   defaultValue = "",
   onSearch,
+  onReset,
   size = "default",
   showAIBadge = true,
 }: SearchBoxProps) {
@@ -35,22 +30,32 @@ export function SearchBox({
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
+  // Reset local state when defaultValue changes (e.g. parent reset)
+  if (defaultValue !== query && defaultValue === "") {
+    // setQuery(""); // This causes infinite loop if not careful, handled by parent key or effect usually.
+    // Better: Parent passes key to force re-mount if strictly needed, or we expose a reset handler.
+    // For now, let's trust onReset handles parent state, and we handle local.
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim()) return;
+
+    // Allow empty query to support filter-only search
+    const effectiveQuery = query.trim();
 
     setIsLoading(true);
 
     if (onSearch) {
-      await onSearch(query);
+      await onSearch(effectiveQuery);
       setIsLoading(false);
     } else {
-      router.push(`/search?q=${encodeURIComponent(query)}`);
+      router.push(`/search?q=${encodeURIComponent(effectiveQuery)}`);
     }
   };
 
-  const handleExampleClick = (example: string) => {
-    setQuery(example);
+  const handleReset = () => {
+    setQuery("");
+    if (onReset) onReset();
   };
 
   return (
@@ -67,46 +72,52 @@ export function SearchBox({
             onChange={(e) => setQuery(e.target.value)}
             placeholder={placeholder}
             className={cn(
-              "pl-10 pr-24",
+              "pl-10 pr-32", // Increased padding right to accommodate buttons
               size === "lg" && "h-14 text-lg"
             )}
           />
-          {showAIBadge && (
-            <div className="absolute right-20 top-1/2 -translate-y-1/2 hidden sm:flex items-center gap-1 text-xs text-muted-foreground">
-              <Sparkles className="h-3 w-3" />
-              <span>AI</span>
-            </div>
-          )}
-          <Button
-            type="submit"
-            disabled={isLoading || !query.trim()}
-            className={cn(
-              "absolute right-1 top-1/2 -translate-y-1/2",
-              size === "lg" && "h-12"
+
+          {/* Controls Container */}
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            {/* AI Badge */}
+            {showAIBadge && (
+              <div className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground mr-2">
+                <Sparkles className="h-3 w-3" />
+                <span>AI</span>
+              </div>
             )}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              "Tìm kiếm"
+
+            {/* Reset Button */}
+            {onReset && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 hover:bg-transparent text-muted-foreground hover:text-foreground"
+                onClick={handleReset}
+                title="Xóa tìm kiếm"
+              >
+                <span className="sr-only">Reset</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-x"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+              </Button>
             )}
-          </Button>
+
+            <Button
+              type="submit"
+              disabled={isLoading}
+              className={cn(
+                size === "lg" && "h-12"
+              )}
+            >
+              {isLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Tìm kiếm"
+              )}
+            </Button>
+          </div>
         </div>
       </form>
-
-      {/* Example queries */}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <span className="text-sm text-muted-foreground">Ví dụ:</span>
-        {EXAMPLE_QUERIES.map((example) => (
-          <button
-            key={example}
-            onClick={() => handleExampleClick(example)}
-            className="text-sm text-primary hover:underline"
-          >
-            {example}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

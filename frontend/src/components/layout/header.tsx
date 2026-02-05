@@ -9,6 +9,7 @@ import {
   BarChart3,
   Settings,
   Menu,
+  Calculator,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,7 @@ import { useState } from "react";
 const navItems = [
   { href: "/", label: "Trang chủ", icon: Home },
   { href: "/search", label: "Tìm kiếm", icon: Search },
+  { href: "/valuation", label: "Định giá AI", icon: Calculator },
   { href: "/analytics", label: "Phân tích", icon: BarChart3 },
 ];
 
@@ -46,6 +48,12 @@ export function Header() {
             className="text-sm font-medium transition-colors hover:text-primary"
           >
             Tìm kiếm
+          </Link>
+          <Link
+            href="/valuation"
+            className="text-sm font-medium transition-colors hover:text-primary"
+          >
+            Định giá AI
           </Link>
           <Link
             href="/analytics"

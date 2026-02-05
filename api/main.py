@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from loguru import logger
 
-from api.routes import search, listings, analytics
+from api.routes import search, listings, analytics, chat, valuation
 from storage.database import init_db, close_db, get_session
 from storage.vector_db import VectorDB
 from scheduler.jobs import get_scheduler, setup_jobs
@@ -167,6 +167,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(listings.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
+app.include_router(chat.router)
+app.include_router(valuation.router)
 
 
 # Health check

@@ -29,13 +29,17 @@ interface FilterPanelProps {
   onReset: () => void;
 }
 
-const PROPERTY_TYPES = [
+export const PROPERTY_TYPES = [
+  { value: "chung-cu", label: "Căn hộ chung cư" },
   { value: "nha-rieng", label: "Nhà riêng" },
-  { value: "chung-cu", label: "Chung cư" },
-  { value: "dat", label: "Đất nền" },
-  { value: "biet-thu", label: "Biệt thự" },
-  { value: "nha-pho", label: "Nhà phố" },
-  { value: "shop-house", label: "Shophouse" },
+  { value: "biet-thu", label: "Biệt thự / Liền kề" },
+  { value: "nha-mat-pho", label: "Nhà mặt phố" },
+  { value: "shophouse", label: "Shophouse / Nhà phố thương mại" },
+  { value: "dat-nen", label: "Đất nền dự án" },
+  { value: "dat", label: "Đất" },
+  { value: "trang-trai", label: "Trang trại / Khu nghỉ dưỡng" },
+  { value: "condotel", label: "Condotel" },
+  { value: "kho-xuong", label: "Kho / Nhà xưởng" },
 ];
 
 const PRICE_OPTIONS = [

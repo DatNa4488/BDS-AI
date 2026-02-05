@@ -152,6 +152,7 @@ class SearchResponse(BaseModel):
     execution_time_ms: int = 0
     synthesis: Optional[str] = None
     errors: list[str] = Field(default_factory=list)
+    applied_filters: Optional[dict] = None # New field to return actual filters used
 
 
 # ============================================================================
@@ -218,10 +219,11 @@ class SavedSearchResponse(BaseModel):
 
 class ScrapeStats(BaseModel):
     """Scraping statistics."""
-    total_runs: int
-    total_found: int
-    total_new: int
-    avg_duration: float
+    total_scrapes: int
+    successful_scrapes: int
+    total_listings_found: int
+    total_new_listings: int
+    avg_duration_seconds: float
     period_days: int
 
 

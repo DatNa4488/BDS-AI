@@ -57,6 +57,7 @@ class SearchIntent:
     bathrooms: Optional[int] = None
     features: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)
+    requirements: list[str] = field(default_factory=list) # New: Detailed requirements (e.g., "ngõ ô tô", "nở hậu")
     intent: str = "mua"  # mua or thuê
 
     @classmethod
@@ -66,9 +67,14 @@ class SearchIntent:
         price = data.get("price", {})
         area = data.get("area", {})
 
+        # Sanitize city if LLM returns "Hà Nội | Hồ Chí Minh"
+        raw_city = location.get("city", "Hà Nội")
+        if raw_city and "|" in raw_city:
+            raw_city = raw_city.split("|")[0].strip()
+
         return cls(
             property_type=data.get("property_type"),
-            city=location.get("city", "Hà Nội"),
+            city=raw_city,
             district=location.get("district"),
             ward=location.get("ward"),
             street=location.get("street"),
@@ -81,6 +87,7 @@ class SearchIntent:
             bathrooms=data.get("bathrooms"),
             features=data.get("features", []),
             keywords=data.get("keywords", []),
+            requirements=data.get("requirements", []),
             intent=data.get("intent", "mua"),
         )
 
@@ -164,11 +171,52 @@ class RealEstateSearchAgent:
         logger.info(f"✅ Google-first search: {self.google_first} (forced)")
 
     def _init_llm(self):
-        """Initialize LLM with Groq → Ollama fallback strategy."""
+        """Initialize LLM with Priority: Ollama -> Gemini -> Groq."""
+        
+        # 1. Priority: Ollama (Local, Unrestricted)
+        try:
+            from browser_use.llm.ollama.chat import ChatOllama as BrowserUseOllama
+            # logger.info(f"🔄 Attempting to use Ollama ({settings.ollama_model})...")
+            
+            # Check if Ollama is reachable? 
+            # BrowserUseOllama is lazy, but we want it as primary.
+            
+            llm = BrowserUseOllama(
+                model=settings.ollama_model,
+                host=settings.ollama_base_url,
+                timeout=120, # Increase timeout for local inference
+            )
+            logger.info(f"✅ Selected Primary LLM: Ollama ({settings.ollama_model})")
+            return llm
+        except Exception as e:
+            logger.warning(f"⚠️ Ollama initialization failed: {e}")
 
-        # Try Groq first (if configured) - using browser-use native ChatGroq
-        if settings.llm_mode == "groq" and settings.groq_api_key:
+        # 2. Priority: Gemini (Fast, but Rate Limited)
+        if settings.gemini_api_key:
             try:
+                logger.info("🔄 Falling back to Gemini...")
+                from langchain_google_genai import ChatGoogleGenerativeAI
+                
+                # Wrapper to satisfy browser-use 'provider' check safely
+                class BrowserUseGemini(ChatGoogleGenerativeAI):
+                    provider: str = "google"
+
+                llm = BrowserUseGemini(
+                    model=settings.gemini_model,
+                    google_api_key=settings.gemini_api_key,
+                    temperature=0.1,
+                    max_retries=2,
+                    timeout=60,
+                )
+                logger.info(f"✅ Selected Fallback LLM: Gemini")
+                return llm
+            except Exception as e:
+                logger.warning(f"⚠️ Gemini initialization failed: {e}")
+
+        # 3. Priority: Groq (Fastest, High Limits but 500k/day)
+        if settings.groq_api_key:
+            try:
+                logger.info("🔄 Falling back to Groq...")
                 from browser_use.llm.groq.chat import ChatGroq as BrowserUseGroq
 
                 llm = BrowserUseGroq(
@@ -178,49 +226,13 @@ class RealEstateSearchAgent:
                     timeout=30,
                     max_retries=2
                 )
-
-                logger.info(f"✅ Using browser-use Groq: {settings.groq_model}")
-                logger.warning("⚠️ Note: Groq free tier has 500k tokens/day limit")
+                logger.info(f"✅ Selected Fallback LLM: Groq")
                 return llm
-
             except Exception as e:
-                logger.warning(f"⚠️ Groq failed: {e}")
-                logger.info("⚠️ Falling back to Gemini or Ollama...")
+                logger.warning(f"⚠️ Groq initialization failed: {e}")
 
-        # Try Gemini (if configured) - FREE 15 RPM, 1500 RPD
-        if settings.llm_mode == "gemini" and settings.gemini_api_key:
-            try:
-                from langchain_google_genai import ChatGoogleGenerativeAI
-
-                llm = ChatGoogleGenerativeAI(
-                    model=settings.gemini_model,
-                    google_api_key=settings.gemini_api_key,
-                    temperature=0.1,
-                    max_retries=2,
-                    timeout=60,
-                )
-
-                logger.info(f"✅ Using Gemini: {settings.gemini_model}")
-                logger.info("💡 Gemini FREE tier: 15 RPM, 1500 requests/day")
-                return llm
-
-            except Exception as e:
-                logger.warning(f"⚠️ Gemini failed: {e}")
-                logger.info("⚠️ Falling back to Ollama local...")
-
-        # Fallback to Ollama local - using browser-use native ChatOllama
-        try:
-            from browser_use.llm.ollama.chat import ChatOllama as BrowserUseOllama
-
-            llm = BrowserUseOllama(
-                model=settings.ollama_model,
-                host=settings.ollama_base_url,
-            )
-            logger.info(f"✅ Using browser-use Ollama: {settings.ollama_model}")
-            return llm
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize any LLM: {e}")
-            raise RuntimeError("No LLM available. Check Groq API key or Ollama installation.")
+        logger.error("❌ Failed to initialize ALL LLMs (Ollama, Gemini, Groq)")
+        raise RuntimeError("No LLM available. Please check your API keys or Ollama.")
 
     async def parse_query(self, query: str) -> SearchIntent:
         """Parse natural language query into structured search intent."""
@@ -234,7 +246,7 @@ Trả về CHÍNH XÁC JSON format (không có text khác):
 {{
     "property_type": "chung cư (hoặc nhà riêng, đất nền... CHỌN 1 LOẠI DUY NHẤT)",
     "location": {{
-        "city": "Hà Nội | Hồ Chí Minh",
+        "city": "Hà Nội (hoặc Hồ Chí Minh, chọn 1)",
         "district": "tên quận/huyện hoặc null"
     }},
     "price": {{
@@ -243,7 +255,8 @@ Trả về CHÍNH XÁC JSON format (không có text khác):
         "text": "text giá như 2-3 tỷ"
     }},
     "bedrooms": số_hoặc_null,
-    "intent": "mua | thuê"
+    "intent": "mua | thuê",
+    "requirements": ["keyword1", "keyword2"]
 }}
 
 Lưu ý quan trọng:
@@ -251,13 +264,30 @@ Lưu ý quan trọng:
 - Quận/Huyện Hà Nội: Cầu Giấy, Đống Đa, Ba Đình, Hoàn Kiếm, Thanh Xuân, Hai Bà Trưng, Long Biên, Tây Hồ, Nam Từ Liêm, Bắc Từ Liêm, Hà Đông, etc.
 - Quận TP.HCM: Quận 1, Quận 2, Quận 3, Bình Thạnh, Phú Nhuận, Gò Vấp, Thủ Đức, etc.
 - NẾU query có tên quận/huyện, PHẢI điền vào "district"
+- KHÔN NGOAN: Map địa danh về Quận tương ứng. Ví dụ:
+  - "gần hồ Tây", "view hồ Tây" -> district: "Tây Hồ"
+  - "gần bờ hồ", "phố cổ" -> district: "Hoàn Kiếm"
+  - "gần Landmark 81" -> district: "Bình Thạnh" (TP.HCM)
+- "requirements" là các yêu cầu chi tiết khác ngoài giá/khu vực. Ví dụ:
+  - "ngõ ô tô" -> ["ngõ ô tô", "ô tô đỗ"]
+  - "kinh doanh tốt" -> ["kinh doanh"]
+  - "gần hồ" -> ["gần hồ", "view hồ"]
+  - "nở hậu" -> ["nở hậu"]
+  - "mặt tiền" -> ["mặt tiền", "mặt phố"]
 """
 
         try:
             # Different message format for different LLMs
+            # Different message format for different LLMs
             if "Gemini" in type(self.llm).__name__ or "Google" in type(self.llm).__name__:
                 from langchain_core.messages import HumanMessage
-                response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+                # Safe call for Gemini wrapper
+                try:
+                    response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+                except AttributeError:
+                    # Fallback if ainvoke is missing (should stick to standard langchain interface)
+                    response = self.llm.invoke([HumanMessage(content=prompt)])
+                
                 content = response.content if hasattr(response, 'content') else str(response)
             else:
                 from browser_use.llm import UserMessage
@@ -275,11 +305,45 @@ Lưu ý quan trọng:
                     raise ValueError("Empty intent from LLM")
 
                 logger.info(f"Parsed intent: property_type={intent.property_type}, "
-                           f"district={intent.district}, price={intent.price_text}")
+                           f"district={intent.district}, price={intent.price_text}, reqs={intent.requirements}")
+                           
+                # HYBRID FIX: If LLM missed district, check fallback rules (Regex/Landmark)
+                if not intent.district:
+                     logger.debug("⚠️ LLM returned None for district, checking fallback rules...")
+                     fallback = self._fallback_parse_query(query)
+                     if fallback.district:
+                         intent.district = fallback.district
+                         logger.info(f"✅ Backfilled district from regex/landmark: {intent.district}")
+                         
                 return intent
 
         except Exception as e:
-            logger.warning(f"Query parsing error or empty: {e}")
+            logger.warning(f"Query parsing error (Primary LLM): {e}")
+            
+            # Semantic Fallback: Try Ollama if Gemini failed
+            if "Gemini" in type(self.llm).__name__ or "Google" in type(self.llm).__name__:
+                 logger.info("🔄 Switching to Ollama for fallback parsing...")
+                 try:
+                     from browser_use.llm.ollama.chat import ChatOllama as BrowserUseOllama
+                     from browser_use.llm import UserMessage
+                     from config import settings 
+                     
+                     ollama_llm = BrowserUseOllama(
+                        model=settings.ollama_model,
+                        host=settings.ollama_base_url,
+                     )
+                     
+                     response = await ollama_llm.ainvoke([UserMessage(content=prompt)])
+                     content = response.completion if hasattr(response, 'completion') else str(response)
+                     
+                     parsed = self._safe_parse_json(content)
+                     if parsed:
+                         intent = SearchIntent.from_dict(parsed)
+                         logger.info(f"✅ Parsed intent via Ollama: {intent}")
+                         return intent
+                         
+                 except Exception as ollama_e:
+                     logger.warning(f"❌ Ollama fallback also failed: {ollama_e}")
 
         # Fallback: basic regex parsing
         return self._fallback_parse_query(query)
@@ -318,20 +382,88 @@ Lưu ý quan trọng:
         intent = SearchIntent()
         query_lower = query.lower()
 
-        # Property type
-        for ptype in ["chung cư", "căn hộ", "nhà riêng", "biệt thự", "đất nền", "nhà mặt phố"]:
+        # Property type (Accented + Unaccented)
+        ptype_map = {
+            "chung cu": "chung cư", "chung cư": "chung cư", "can ho": "chung cư", "căn hộ": "chung cư",
+            "nha rieng": "nhà riêng", "nhà riêng": "nhà riêng", "nha dat": "nhà riêng",
+            "biet thu": "biệt thự", "biệt thự": "biệt thự", "villa": "biệt thự",
+            "dat nen": "đất nền", "đất nền": "đất nền", "dat tho cu": "đất nền",
+            "nha mat pho": "nhà mặt phố", "nhà mặt phố": "nhà mặt phố", "shophouse": "nhà mặt phố"
+        }
+        
+        sorted_ptypes = sorted(ptype_map.keys(), key=len, reverse=True)
+        
+        for ptype in sorted_ptypes:
             if ptype in query_lower:
-                intent.property_type = ptype
+                intent.property_type = ptype_map[ptype]
+                logger.info(f"✅ Regex Fallback: Found property type '{ptype}' -> '{intent.property_type}'")
                 break
 
         # District detection
-        districts = ["cầu giấy", "ba đình", "hoàn kiếm", "đống đa", "hai bà trưng",
-                    "thanh xuân", "hoàng mai", "long biên", "nam từ liêm", "bắc từ liêm",
-                    "tây hồ", "hà đông", "quận 1", "quận 2", "quận 3", "quận 7", "bình thạnh"]
-        for district in districts:
-            if district in query_lower:
-                intent.district = district.title()
+        # 1. Check specific landmarks first
+        landmark_map = {
+            "hồ tây": "Tây Hồ",
+            "ho tay": "Tây Hồ",
+            "phố cổ": "Hoàn Kiếm",
+            "hồ gươm": "Hoàn Kiếm",
+            "bờ hồ": "Hoàn Kiếm",
+            "royal city": "Thanh Xuân",
+            "times city": "Hai Bà Trưng",
+            "ecopark": "Văn Giang",
+            "ocean park": "Gia Lâm",
+            "smart city": "Nam Từ Liêm"
+        }
+        
+        for landmark, district_name in landmark_map.items():
+            if landmark in query_lower:
+                intent.district = district_name
                 break
+                
+        # 2. If no landmark, check standard district names
+        # 2. If no landmark, check standard district names (Accented + Unaccented)
+        if not intent.district:
+            # Map variations to standard display name
+            district_map = {
+                "ba dinh": "Ba Đình", "ba đình": "Ba Đình",
+                "hoan kiem": "Hoàn Kiếm", "hoàn kiếm": "Hoàn Kiếm",
+                "tay ho": "Tây Hồ", "tây hồ": "Tây Hồ",
+                "cau giay": "Cầu Giấy", "cầu giấy": "Cầu Giấy",
+                "dong da": "Đống Đa", "đống đa": "Đống Đa",
+                "hai ba trung": "Hai Bà Trưng", "hai bà trưng": "Hai Bà Trưng",
+                "hoang mai": "Hoàng Mai", "hoàng mai": "Hoàng Mai",
+                "thanh xuan": "Thanh Xuân", "thanh xuân": "Thanh Xuân",
+                "long bien": "Long Biên", "long biên": "Long Biên",
+                "nam tu liem": "Nam Từ Liêm", "nam từ liêm": "Nam Từ Liêm",
+                "bac tu liem": "Bắc Từ Liêm", "bắc từ liêm": "Bắc Từ Liêm",
+                "ha dong": "Hà Đông", "hà đông": "Hà Đông",
+                "son tay": "Sơn Tây", "sơn tây": "Sơn Tây",
+                "phuc tho": "Phúc Thọ", "phúc thọ": "Phúc Thọ",
+                "dong anh": "Đông Anh", "đông anh": "Đông Anh",
+                "gia lam": "Gia Lâm", "gia lâm": "Gia Lâm",
+                "soc son": "Sóc Sơn", "sóc sơn": "Sóc Sơn",
+                "thanh tri": "Thanh Trì", "thanh trì": "Thanh Trì",
+                "hoai duc": "Hoài Đức", "hoài đức": "Hoài Đức",
+                "thach that": "Thạch Thất", "thạch thất": "Thạch Thất",
+                "quoc oai": "Quốc Oai", "quốc oai": "Quốc Oai",
+                "thanh oai": "Thanh Oai", "thanh oai": "Thanh Oai",
+                "thuong tin": "Thường Tín", "thường tín": "Thường Tín",
+                "me linh": "Mê Linh", "mê linh": "Mê Linh",
+                "chuong my": "Chương Mỹ", "chương mỹ": "Chương Mỹ",
+                "ba vi": "Ba Vì", "ba vì": "Ba Vì",
+                "dan phuong": "Đan Phượng", "đan phượng": "Đan Phượng",
+                "ung hoa": "Ứng Hòa", "ứng hòa": "Ứng Hòa",
+                "my duc": "Mỹ Đức", "mỹ đức": "Mỹ Đức",
+                "phu xuyen": "Phú Xuyên", "phú xuyên": "Phú Xuyên"
+            }
+            
+            # Sort keys by length desc to match longest first (e.g. "Nam Tu Liem" vs "Nam Tu")
+            sorted_keys = sorted(district_map.keys(), key=len, reverse=True)
+            
+            for key in sorted_keys:
+                if key in query_lower:
+                    intent.district = district_map[key]
+                    logger.info(f"✅ Regex Fallback: Found district '{key}' -> '{intent.district}'")
+                    break
 
         # Bedrooms
         bedroom_match = re.search(r'(\d+)\s*(pn|phòng ngủ|phong ngu|pn)', query_lower)
@@ -352,8 +484,10 @@ Lưu ý quan trọng:
                 intent.price_text = f"dưới {under_match.group(1)} tỷ"
 
         # City
+        # City - STRICTLY FORCE HANOI as per user request
+        intent.city = "Hà Nội"
         if "hồ chí minh" in query_lower or "sài gòn" in query_lower or "hcm" in query_lower:
-            intent.city = "Hồ Chí Minh"
+            logger.warning("Ignoring request for HCM, enforcing Hanoi as per policy.")
 
         # Intent (buy/rent)
         if "thuê" in query_lower or "cho thuê" in query_lower:
@@ -362,75 +496,46 @@ Lưu ý quan trọng:
         intent.keywords = [query]
         return intent
 
-    async def search(self, query: str, max_results: int = 20, platforms: List[str] = None) -> SearchResult:
+    async def search(self, query: str, max_results: int = 10, platforms: list = None, intent: SearchIntent = None) -> SearchResult:
         """
-        MAIN SEARCH METHOD - Google-First Strategy
-
-        Flow:
-        1. Google search → discover URLs from multiple platforms
-        2. Scrape each URL sequentially
-        3. Aggregate + deduplicate
-        4. Return all listings
-
+        Perform a comprehensive search using DIRECT SCRAPING (Optimized).
+        Google Search has been removed to prevent hallucinations with local LLM.
+        
         Args:
-            query: Natural language search query
-            max_results: Maximum results to return
-            platforms: List of platforms to search (e.g. ['chotot', 'batdongsan'])
-
-        Returns:
-            SearchResult with listings from multiple sources
+            query: Natural language query
+            max_results: Maximum number of results to return
+            platforms: List of platforms to scrape (chotot, batdongsan, etc)
+            intent: Optional pre-parsed intent to avoid re-parsing
         """
         start_time = datetime.now()
+        
+        # 1. Parse Query Intent
+        if not intent:
+            intent = await self.parse_query(query)
+        else:
+            logger.info(f"Using provided intent: {intent}")
+        
         result = SearchResult()
 
         print(f"\n{'='*60}")
-        print(f"🏠 REAL ESTATE SEARCH: {query}")
+        print(f"🏠 REAL ESTATE SEARCH (Direct Mode): {query}")
         print(f"{'='*60}")
 
         try:
-            # Parse query for intent understanding
-            intent = await self.parse_query(query)
-
             all_listings = []
 
-            if self.google_first: # Use self.google_first
-                # STEP 1: Google Search to discover URLs
-                print("\n📍 STEP 1: Google Search for URLs")
-                urls_to_scrape = await self._google_search_first(query, intent)
+            # DIRECT SCRAPE STRATEGY (Deterministic & Fast)
+            print("\n📍 STEP 1: Direct Scraping (Batdongsan & Chotot)")
+            all_listings = await self._fallback_direct_scrape(intent, result, platforms)
 
-                if urls_to_scrape:
-                    # STEP 2: Scrape each URL sequentially
-                    print(f"\n📍 STEP 2: Scraping {len(urls_to_scrape)} URLs")
-
-                    for i, url_data in enumerate(urls_to_scrape):
-                        # Filter by platform if requested
-                        if platforms and url_data.get('platform') not in platforms:
-                            continue
-                            
-                        print(f"\n--- URL {i+1}/{len(urls_to_scrape)} ---")
-
-                        # Rate limit check
-                        await self._rate_limit_wait()
-
-                        listings = await self._scrape_single_url(url_data)
-                        if listings:
-                            all_listings.extend(listings)
-                            result.sources_searched.append(url_data.get('platform', 'unknown'))
-
-                        # Delay between URLs for rate limit safety
-                        if i < len(urls_to_scrape) - 1:
-                            delay = settings.delay_between_urls
-                            print(f"  ⏳ Cooling down {delay}s...")
-                            await asyncio.sleep(delay)
-                else:
-                    print("⚠️ No URLs found from Google, falling back to direct scrape")
-                    all_listings = await self._fallback_direct_scrape(intent, result, platforms)
-            else:
-                # Direct scrape without Google search
-                all_listings = await self._fallback_direct_scrape(intent, result, platforms)
-
-            # STEP 3: Deduplicate
-            print(f"\n📍 STEP 3: Deduplication")
+            # STEP 2: Deduplicate
+            print(f"\n📍 STEP 2: Deduplication")
+            
+            # Safety check: ensure all_listings is a list
+            if all_listings is None:
+                logger.warning("all_listings is None, initializing to empty list")
+                all_listings = []
+            
             print(f"   [DEBUG_SEARCH] Pre-dedup count: {len(all_listings)}")
             result.listings = self._deduplicate_listings(all_listings)[:max_results]
             result.total_found = len(result.listings)
@@ -438,7 +543,7 @@ Lưu ý quan trọng:
             print(f"\n{'='*60}")
             print(f"✅ TOTAL: {result.total_found} unique listings")
             print(f"   (from {len(all_listings)} raw results)")
-            print(f"   Sources: {', '.join(set(result.sources_searched))}")
+            print(f"   Sources: {', '.join(set(result.sources_searched)) if result.sources_searched else 'None'}")
             print(f"{'='*60}")
 
         except Exception as e:
@@ -451,109 +556,6 @@ Lưu ý quan trọng:
         logger.info(f"Search completed: {result.total_found} results in {result.execution_time_ms}ms")
 
         return result
-
-    async def _google_search_first(self, user_query: str, intent: SearchIntent) -> List[Dict]:
-        """
-        Step 1: Google search để tìm URLs phù hợp từ nhiều platforms.
-
-        Returns:
-            List of URL data dicts to scrape
-        """
-        print("\n🔍 Google Search for real estate URLs...")
-
-        # Build optimized Google search query
-        search_query = self._build_google_query(user_query, intent)
-        print(f"   Search query: {search_query}")
-
-        task = f"""
-NHIỆM VỤ: Google search và collect URLs bất động sản
-1. Navigate to https://www.google.com
-2. Search: "{search_query}"
-3. Wait for results to load
-4. Extract TOP 10-12 organic results (skip ads):
-   - URL
-   - Title
-
-5. Identify platform (domain):
-   - chotot, batdongsan, mogi, alonhadat, muaban, facebook
-
-6. Exclude:
-   - News/Articles (vnexpress, dantri...)
-   - Ads/Sponsored
-   - E-commerce (shopee, lazada, tiki, amazon, walmart, ebay) -> IGNORE THESE!
-
-7. Return JSON array ONLY:
-[
-  {{"url": "https://...", "platform": "batdongsan", "title": "..."}}
-]
-
-IMPORTANT:
-- REAL ESTATE / BẤT ĐỘNG SẢN ONLY!
-- NO SHOPPING! NO LAPTOPS! NO AMAZON/WALMART!
-- Output JSON ONLY.
-- Do NOT search for this text.
-"""
-
-        try:
-            agent = Agent(
-                task=task,
-                llm=self.llm,
-                use_vision=settings.browser_use_vision,
-                max_actions_per_step=3,
-            )
-
-            result = await agent.run(max_steps=settings.max_steps_google_search)
-            urls_data = self._parse_google_results(result)
-
-            if urls_data:
-                # Sort by platform priority
-                urls_data.sort(key=lambda x: PLATFORM_PRIORITY.get(x.get('platform', 'other'), 4))
-
-                # Limit to max URLs
-                urls_data = urls_data[:settings.max_urls_per_search]
-
-                print(f"   ✅ Found {len(urls_data)} relevant URLs:")
-                for u in urls_data:
-                    print(f"      - [{u.get('platform')}] {u.get('url', '')[:60]}...")
-
-                return urls_data
-            else:
-                print("   ⚠️ No URLs parsed from Google results")
-                return []
-
-        except Exception as e:
-            logger.error(f"Google search error: {e}")
-            print(f"   ❌ Google search error: {e}")
-            return []
-
-    def _build_google_query(self, user_query: str, intent: SearchIntent) -> str:
-        """Build optimized Google search query."""
-        parts = []
-
-        # Intent
-        if intent.intent == "thuê":
-            parts.append("cho thuê")
-        else:
-            parts.append("mua bán")
-
-        # Property type
-        if intent.property_type:
-            parts.append(intent.property_type)
-
-        # Bedrooms
-        if intent.bedrooms:
-            parts.append(f"{intent.bedrooms} phòng ngủ")
-
-        # Location
-        if intent.district:
-            parts.append(intent.district)
-        parts.append(intent.city or "Hà Nội")
-
-        # Price
-        if intent.price_text:
-            parts.append(intent.price_text)
-
-        return " ".join(parts)
 
     def _parse_google_results(self, result: Any) -> List[Dict]:
         """Parse Google search agent results into URL list."""
@@ -622,6 +624,11 @@ IMPORTANT:
 
             # Skip unwanted platforms
             if item['platform'] in ['news', 'forum', 'video']:
+                continue
+
+            # Strict blacklist check
+            blacklist = ['amazon', 'ebay', 'shopee', 'lazada', 'tiki', 'walmart', 'bestbuy', 'alibaba', 'taobao', '1688']
+            if any(b in url.lower() for b in blacklist):
                 continue
 
             valid_urls.append(item)
@@ -818,11 +825,16 @@ CHỈ return JSON array với data THẬT từ page, không fake.
                         
             finally:
                 await browser.close()
+        
+        # Return all collected listings
+        return all_listings
+
 
     def _filter_listings_by_intent(self, listings: List[Dict], intent: SearchIntent) -> List[Dict]:
-        """Filter listings based on search intent (Price, District)."""
+        """Filter listings based on search intent (Price, District, City)."""
         filtered = []
-        print(f"   [FILTER] Checking {len(listings)} listings against intent: Price < {intent.price_max}, Dist: {intent.district}")
+        print(f"   [FILTER] Checking {len(listings)} listings against intent: Price < {intent.price_max}, Dist: {intent.district}, City: {intent.city}")
+        
         for listing in listings:
             # 1. Price Check
             price = listing.get("price_number")
@@ -836,11 +848,93 @@ CHỈ return JSON array với data THẬT từ page, không fake.
                     print(f"   [REJECT] Price {listing.get('price_text')} ({price}) < min {intent.price_min}")
                     continue
 
-            # 2. Location Check (Optional: Could strict filter by district)
-            # For now, we trust the scraper's context, but we ensure district is filled
-            if not listing["location"]["district"] and intent.district:
-                listing["location"]["district"] = intent.district
+            # 2. Strict Location Check
+            l_loc = listing.get("location", {})
+            l_city = l_loc.get("city", "")
+            l_dist = l_loc.get("district", "")
             
+            # City Mismatch (Crucial: Hanoi vs HCM)
+            if intent.city and l_city:
+                # 1. Exact match (case-insensitive) - FAST PATH
+                if intent.city.lower() == l_city.lower():
+                     pass # Match!
+                else:
+                    # Normalize key cities
+                    c1 = intent.city.lower()
+                    c2 = l_city.lower()
+                    
+                    # Check mapping for HN/HCM variants
+                    hn_variants = ["hà nội", "ha noi", "hn"]
+                    hcm_variants = ["hồ chí minh", "ho chi minh", "hcm", "sài gòn", "sai gon", "tp.hcm"]
+                    
+                    is_hn_1 = any(v in c1 for v in hn_variants)
+                    is_hn_2 = any(v in c2 for v in hn_variants)
+                    is_hcm_1 = any(v in c1 for v in hcm_variants)
+                    is_hcm_2 = any(v in c2 for v in hcm_variants)
+                    
+                    # Log logic for debugging
+                    # print(f"DEBUG: City check '{c1}' vs '{c2}' -> HN1:{is_hn_1}, HN2:{is_hn_2}, HCM1:{is_hcm_1}, HCM2:{is_hcm_2}")
+
+                    if (is_hn_1 and is_hcm_2) or (is_hcm_1 and is_hn_2):
+                        print(f"   [REJECT] City mismatch: Intent '{intent.city}' vs Listing '{l_city}'")
+                        continue
+                    
+                    # If intent is specific (e.g. "Hà Nội") and listing is just "Toàn Quốc" or different, we might keep it 
+                    # if the district matches, but here we cover the hard mismatch case.
+
+            # District Mismatch
+            if intent.district and l_dist:
+                d1 = intent.district.lower().replace("quận", "").replace("huyện", "").strip()
+                d2 = l_dist.lower().replace("quận", "").replace("huyện", "").strip()
+                
+                # If scraping found a district, it MUST match intent if intent has district
+                # (Allow partial match e.g., "Thanh Xuan" in "Thanh Xuan Trung")
+                if d1 not in d2 and d2 not in d1:
+                     print(f"   [REJECT] District mismatch: Intent '{intent.district}' vs Listing '{l_dist}'")
+                     continue
+            
+            # Backfill REMOVED - User requested Strict Mode ("Quality over Quantity")
+            # If listing has no district/city but intent requires it, we must REJECT it
+            # instead of assuming it matches.
+            
+            # Strict District Check for Missing Data
+            if intent.district and not l_dist:
+                 print(f"   [REJECT] Missing District info (Intent requires '{intent.district}')")
+                 continue
+                 
+            # Strict Bedroom Check for Missing Data
+            if intent.bedrooms:
+                l_bedrooms = listing.get("bedrooms")
+                if l_bedrooms is None:
+                     print(f"   [REJECT] Missing Bedroom info (Intent requires {intent.bedrooms})")
+                     continue
+                try:
+                    if int(l_bedrooms) != intent.bedrooms:
+                         print(f"   [REJECT] Bedroom mismatch: Intent {intent.bedrooms} vs Listing {l_bedrooms}")
+                         continue
+                except:
+                     pass
+
+            # 5. Strict Property Type Check (New)
+            # If intent is "chung cư", reject "nhà đất", "biệt thự", "liền kề" if title is clear.
+            if intent.property_type:
+                pt_lower = intent.property_type.lower()
+                title_lower = listing.get("title", "").lower()
+
+                # Define keywords for common types
+                # Map intent type -> [must_have_one_of] OR [must_not_have]
+                # For now, strict inclusion for "chung cư"
+                if "chung cư" in pt_lower or "căn hộ" in pt_lower:
+                    valid_keywords = ["chung cư", "căn hộ", "tập thể", "apartment", "condo"]
+                    if not any(k in title_lower for k in valid_keywords):
+                        print(f"   [REJECT] Property Type mismatch: Intent '{intent.property_type}' vs Title '{listing.get('title')}'")
+                        continue
+                
+                elif "đất" in pt_lower:
+                    if not any(k in title_lower for k in ["đất", "thổ cư", "lô"]):
+                         print(f"   [REJECT] Property Type mismatch: Intent '{intent.property_type}' vs Title '{listing.get('title')}'")
+                         continue
+
             filtered.append(listing)
         
         print(f"   [FILTER] Kept {len(filtered)}/{len(listings)} listings")
@@ -853,10 +947,16 @@ CHỈ return JSON array với data THẬT từ page, không fake.
         if prop_type and "|" in prop_type:
             prop_type = prop_type.split("|")[0].strip()
             
-        query = f"{prop_type or 'bất động sản'} {intent.district or ''}"
-        encoded_query = query.strip().replace(" ", "+")
+        # Simplified Query Construction for ChoTot: [Loại BĐS] + [Quận]
+        # Example: "chung cư Ba Đình", "nhà đất Cầu Giấy"
+        district_name = intent.district or ""
+        # Remove prefixes like "Quận", "Huyện" for cleaner search
+        import re
+        district_clean = re.sub(r'^(Quận|Huyện)\s+', '', district_name, flags=re.IGNORECASE)
         
-        # Determine region slug
+        query = f"{prop_type or 'bất động sản'} {district_clean} {intent.city or ''}"
+        
+        # Optimize Region Slug
         region_slug = "toan-quoc"
         if intent.city:
             if "hà nội" in intent.city.lower():
@@ -866,91 +966,156 @@ CHỈ return JSON array với data THẬT từ page, không fake.
             elif "đà nẵng" in intent.city.lower():
                 region_slug = "da-nang"
         
-        url = f"https://nha.chotot.com/{region_slug}/mua-ban-bat-dong-san?q={encoded_query}"
+        # Optimize District Slug Mapping
+        district_slug = ""
+        if intent.district:
+            d_lower = intent.district.lower()
+            slug_map = {
+                "ba đình": "/quan-ba-dinh",
+                "hoàn kiếm": "/quan-hoan-kiem",
+                "tây hồ": "/quan-tay-ho",
+                "long biên": "/quan-long-bien",
+                "cầu giấy": "/quan-cau-giay",
+                "đống đa": "/quan-dong-da",
+                "hai bà trưng": "/quan-hai-ba-trung",
+                "hoàng mai": "/quan-hoang-mai",
+                "thanh xuân": "/quan-thanh-xuan",
+                "sóc sơn": "/huyen-soc-son",
+                "đông anh": "/huyen-dong-anh",
+                "gia lâm": "/huyen-gia-lam",
+                "nam từ liêm": "/quan-nam-tu-liem",
+                "thanh trì": "/huyen-thanh-tri",
+                "bắc từ liêm": "/quan-bac-tu-liem",
+                "mê linh": "/huyen-me-linh",
+                "hà đông": "/quan-ha-dong",
+                "sơn tây": "/thi-xa-son-tay",
+                "ba vì": "/huyen-ba-vi",
+                "phúc thọ": "/huyen-phuc-tho",
+                "đan phượng": "/huyen-dan-phuong",
+                "hoài đức": "/huyen-hoai-duc",
+                "quốc oai": "/huyen-quoc-oai",
+                "thạch thất": "/huyen-thach-that",
+                "chương mỹ": "/huyen-chuong-my",
+                "thanh oai": "/huyen-thanh-oai",
+                "thường tín": "/huyen-thuong-tin",
+                "phú xuyên": "/huyen-phu-xuyen",
+                "ứng hòa": "/huyen-ung-hoa",
+                "mỹ đức": "/huyen-my-duc"
+            }
+            # Find best match
+            for k, v in slug_map.items():
+                if k in d_lower:
+                    district_slug = v
+                    break
+        
+        encoded_query = query.strip().replace(" ", "+")
+        
+        # Priority: URL Structure > Query Param
+        # If district known, go to /ha-noi/quan-ba-dinh/mua-ban-bat-dong-san
+        if district_slug:
+             url = f"https://nha.chotot.com/{region_slug}{district_slug}/mua-ban-bat-dong-san?q={encoded_query}"
+        else:
+             url = f"https://nha.chotot.com/{region_slug}/mua-ban-bat-dong-san?q={encoded_query}"
         
         print(f"   🌐 Navigating to: {url}")
-        # Chotot uses Next.js, wait for network idle to ensure hydration
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        await page.wait_for_timeout(3000)
         
-        html = await page.content()
-        soup = BeautifulSoup(html, 'lxml')
-        listings = []
-        
-        # Robust Strategy: Find all LI elements that likely contain a listing
-        # Chotot listings are usually in LI tags. We filter by checking for "tỷ" or "triệu" in text.
-        candidates = soup.find_all('li')
-        print(f"   Found {len(candidates)} list items, filtering...")
-
-        price_pattern = re.compile(r"(\d+(?:[.,]\d+)?)\s*(tỷ|triệu)", re.IGNORECASE)
-        area_pattern = re.compile(r"(\d+(?:[.,]\d+)?)\s*(m²|m2)", re.IGNORECASE)
-
-        for item in candidates:
-            text = item.get_text(" ", strip=True)
-            link_tag = item.find('a')
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(3000) # Wait for hydration
             
-            # Simple heuristic: Must have price text and a link
-            if link_tag and price_pattern.search(text):
-                full_url = link_tag.get('href', '')
-                if full_url.startswith('/'):
-                    full_url = f"https://nha.chotot.com{full_url}"
-                
-                title = link_tag.get_text(" ", strip=True)
-                
-                # Extract Price
-                price_match = price_pattern.search(text)
-                price = price_match.group(0) if price_match else "Liên hệ"
-                
-                # Extract Area
-                area_match = area_pattern.search(text)
-                area_str = area_match.group(1) if area_match else ""
-                area = self._normalize_vietnamese_number(area_str) if area_str else None
-                
-                # Location (heuristic: extract from text if possible, e.g. "Hà Nội", "Quận X")
-                address = "N/A"
-                if "Hà Nội" in text: address = "Hà Nội"
-                elif "Hồ Chí Minh" in text: address = "TP. Hồ Chí Minh"
-                
-                
-                # Extract Phone (simple regex for 09xx... or 03xx...)
-                phone_pattern = re.compile(r"(0\d{3}[\s.]?\d{3}[\s.]?\d{3}|0\d{2}[\s.]?\d{3}[\s.]?\d{3})")
-                phone_match = phone_pattern.search(text)
-                phone = phone_match.group(0) if phone_match else "Liên hệ"
+            html = await page.content()
+            soup = BeautifulSoup(html, 'lxml')
+            listings = []
+            
+            # CSS Selector Update for Chotot (2025 Layout)
+            # Listings are usually in <li> inside <ul>
+            # Searching for standard list items
+            candidates = soup.find_all('li')
+            print(f"   Structure scan: Found {len(candidates)} list items")
+            
+            seen_urls = set()
+            
+            price_pattern = re.compile(r"(\d+(?:[.,]\d+)?)\s*(tỷ|triệu)", re.IGNORECASE)
+            
+            for item in candidates:
+                try:
+                    # HEURISTIC: A valid listing LI usually contains an <a> tag and Price text
+                    link_tag = item.find('a')
+                    text_content = item.get_text(" ", strip=True)
+                    
+                    if not link_tag: continue
+                    
+                    # Must look like a real estate listing
+                    href = link_tag.get('href', '')
+                    if not href or href in seen_urls: continue
+                    
+                    # Filter out non-listing links (e.g. footer links, nav)
+                    if not any(x in href for x in ['.htm', 'mua-ban-bat-dong-san']):
+                         continue
+                         
+                    # Price check is mandatory for a valid listing
+                    price_match = price_pattern.search(text_content)
+                    if not price_match: continue
 
-                # Location
-                district = extract_district(text)
-                
-                # Strong Fallback: If searching for a specific district, assume listings are in that district
-                if not district and intent.district:
-                    district = intent.district
+                    if href.startswith('/'):
+                        href = f"https://nha.chotot.com{href}"
+                    seen_urls.add(href)
+                    
+                    # Extraction
+                    title = link_tag.get_text(" ", strip=True)
+                    
+                    # Extract Price
+                    price = price_match.group(0)
+                    price_number = self._parse_price_to_number(price)
+                    
+                    # Extract Area
+                    import re
+                    area_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(m²|m2)", text_content, re.IGNORECASE)
+                    area_val = area_match.group(1) if area_match else None
+                    area = self._normalize_vietnamese_number(area_val) if area_val else None
+                    
+                    # Location Heuristic
+                    # Chotot listing usually has district in text if we are lucky, OR we inherit from Intent
+                    # Inherit from Intent if we are on a district-specific page
+                    address = "N/A"
+                    listing_district = None
+                    if district_slug and intent.district:
+                         listing_district = intent.district # Inherit HIGH confidence
+                         address = f"{intent.district}, {intent.city}"
+                    
+                    # If not inherited, try to parse
+                    if not listing_district:
+                        listing_district = extract_district(text_content)
+                    
+                    location = {
+                        "address": address,
+                        "district": listing_district or intent.district, # Fallback to intent
+                        "city": intent.city or "Hà Nội"
+                    }
 
-                # City Fallback
-                city = intent.city if intent.city else "Hà Nội"
+                    listings.append({
+                        "title": title,
+                        "price_text": price,
+                        "price_number": price_number,
+                        "area_m2": area,
+                        "bedrooms": None, # Chotot list view hard to get bedrooms reliably without detail page
+                        "location": location,
+                        "contact": {"phone_clean": "Liên hệ"}, 
+                        "source_url": href,
+                        "source_platform": "chotot"
+                    })
+                    
+                    if len(listings) >= 12: break # Limit 
+                    
+                except Exception as e:
+                    continue
 
-                location = {
-                    "address": address if address != "N/A" else f"{district}, {city}", 
-                    "city": city,
-                    "district": district
-                } 
-
-                # Parse price to number
-                price_number = self._parse_price_to_number(price)
-                
-                listings.append({
-                    "title": title,
-                    "price_text": price,
-                    "price_number": price_number,
-                    "area_m2": area,
-                    "location": location,
-                    "contact": {"phone_clean": phone}, 
-                    "source_url": full_url,
-                    "source_platform": "chotot"
-                })
-                
-                if len(listings) >= 5: break
-        
-        print(f"   Extracted {len(listings)} listings from Chotot")
-        return self._filter_listings_by_intent(listings, intent)
+            print(f"   Extracted {len(listings)} listings from Chotot")
+            return self._filter_listings_by_intent(listings, intent)
+            
+        except Exception as e:
+            logger.error(f"Chotot scrape error: {e}")
+            return []
 
     async def _scrape_batdongsan_direct(self, page, intent) -> List[Dict]:
         """Scrape Batdongsan using robust BeautifulSoup parsing with district targeting."""
@@ -990,7 +1155,33 @@ CHỈ return JSON array với data THẬT từ page, không fake.
         }
 
         # Construct optimized URL
-        base_url = "https://batdongsan.com.vn/ban-nha-dat"
+        # Batdongsan structure: /ban-nha-dat-[quan] or /ban-chung-cu-[quan]
+        
+        base_action = "ban-nha-dat"
+        if intent.property_type:
+            pt_lower = intent.property_type.lower()
+            if "chung cư" in pt_lower or "căn hộ" in pt_lower:
+                base_action = "ban-can-ho-chung-cu"
+            elif "nhà riêng" in pt_lower:
+                base_action = "ban-nha-rieng"
+            elif "biệt thự" in pt_lower or "liền kề" in pt_lower:
+                 base_action = "ban-biet-thu-lien-ke"
+            elif "nhà mặt phố" in pt_lower:
+                base_action = "ban-nha-mat-pho"
+            elif "shophouse" in pt_lower or "nhà phố thương mại" in pt_lower:
+                base_action = "ban-shophouse-nha-pho-thuong-mai"
+            elif "đất nền" in pt_lower:
+                base_action = "ban-dat-nen-du-an"
+            elif "đất" in pt_lower:
+                base_action = "ban-dat"
+            elif "trang trại" in pt_lower or "nghỉ dưỡng" in pt_lower:
+                base_action = "ban-trang-trai-khu-nghi-duong"
+            elif "condotel" in pt_lower:
+                base_action = "ban-condotel"
+            elif "kho" in pt_lower or "xưởng" in pt_lower:
+                base_action = "ban-kho-nha-xuong"
+                
+        base_url = f"https://batdongsan.com.vn/{base_action}"
         city_slug = "ha-noi"
         
         if intent.city and "hồ chí minh" in intent.city.lower():
@@ -999,101 +1190,164 @@ CHỈ return JSON array với data THẬT từ page, không fake.
         target_path = f"{base_url}-{city_slug}"
 
         # If specific district found, use its slug instead of city
+        # Batdongsan URL format: /ban-nha-dat-[district-slug] (implicitly specific to that district)
+        # Note: Usually just /ban-nha-dat-tay-ho (no "ha-noi" suffix if district is known unique, or maybe /ban-nha-dat-tay-ho-ha-noi?)
+        # Standard Batdongsan: /ban-...-[district]-[city]
+        
+        district_slug_part = ""
         if intent.district:
             d_lower = intent.district.lower().replace("quận", "").replace("huyện", "").strip()
             if d_lower in district_slugs:
-                target_path = f"{base_url}-{district_slugs[d_lower]}"
+                d_slug = district_slugs[d_lower]
+                # Batdongsan usually appends city after district: tay-ho-ha-noi
+                target_path = f"{base_url}-{d_slug}-{city_slug}"
+                district_slug_part = d_slug
             elif city_slug == "ha-noi":
-                # Try naive slugify if not in map
                  naive_slug = d_lower.replace(" ", "-")
-                 target_path = f"{base_url}-{naive_slug}"
+                 target_path = f"{base_url}-{naive_slug}-{city_slug}"
 
         url = target_path
         print(f"   🌐 Navigating to: {url}")
         
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        await page.wait_for_timeout(3000)
-        
-        html = await page.content()
-        soup = BeautifulSoup(html, 'lxml')
-        listings = []
-        
-        # Robust Strategy: Identify 'product' or 'card' divs first, fallback to any div with Price pattern
-        candidates = soup.select("div[class*='product'], div[class*='card'], div[class*='item']")
-        if len(candidates) < 3:
-            # Fallback: Find divs that contain "tỷ" or "triệu" directly
-            print("   Structure unclear, using text search fallback...")
-            candidates = soup.find_all('div')
-        
-        print(f"   Scanning {len(candidates)} elements for listings...")
-        
-        price_pattern = re.compile(r"(\d+(?:[.,]\d+)?)\s*(tỷ|triệu)", re.IGNORECASE)
-        area_pattern = re.compile(r"(\d+(?:[.,]\d+)?)\s*(m²|m2)", re.IGNORECASE)
-        
-        seen_urls = set()
-
-        for item in candidates:
-            text = item.get_text(" ", strip=True)
-            link_tag = item.find('a')
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(3000)
             
-            if link_tag and price_pattern.search(text):
-                full_url = link_tag.get('href', '')
-                if not full_url or full_url in seen_urls: continue
-                
-                if full_url.startswith('/'):
-                    full_url = f"https://batdongsan.com.vn{full_url}"
-                
-                seen_urls.add(full_url)
-                
-                # Check if it's a real listing (has price and area usually)
-                price_match = price_pattern.search(text)
-                area_match = area_pattern.search(text)
-                
-                if price_match:
-                    area_val = area_match.group(1) if area_match else ""
+            html = await page.content()
+            soup = BeautifulSoup(html, 'lxml')
+            listings = []
+            
+            # IMPROVED SELECTOR: Focus on .js__card (Official class for listings)
+            candidates = soup.select(".js__card")
+            if not candidates:
+                 # Backup selectors if site updated
+                 candidates = soup.select("div[class*='product-item'], .re__card-full")
+            
+            print(f"   Structure scan: Found {len(candidates)} listings via class")
+            
+            if len(candidates) == 0:
+                 # Fallback to broad scan but filter heavily
+                 print("   Structure unclear, using broad div scan...")
+                 candidates = soup.find_all('div', class_=True)
+
+            price_pattern = re.compile(r"(\d+(?:[.,]\d+)?)\s*(tỷ|triệu|nghìn/m2|nghìn/m²)", re.IGNORECASE)
+            area_pattern = re.compile(r"(\d+(?:[.,]\d+)?)\s*(m²|m2)", re.IGNORECASE)
+            bedroom_pattern = re.compile(r"(\d+)\s*(pn|phòng ngủ|ngủ)", re.IGNORECASE)
+            
+            seen_urls = set()
+
+            for item in candidates:
+                try:
+                    text = item.get_text(" ", strip=True)
+                    link_tag = item.find('a')
                     
-                    # Heuristic location
-                    address = "N/A"
-                    if "Hà Nội" in text: address = "Hà Nội"
-                    elif "Hồ Chí Minh" in text: address = "TP. Hồ Chí Minh"
+                    if not link_tag: continue
+                    if not price_pattern.search(text): continue
                     
+                    full_url = link_tag.get('href', '')
+                    if not full_url or full_url in seen_urls: continue
+                    
+                    if full_url.startswith('/'):
+                        full_url = f"https://batdongsan.com.vn{full_url}"
+                    
+                    # Skip project intro or news links
+                    if "/du-an/" in full_url or "/tin-tuc/" in full_url: continue
+                    
+                    seen_urls.add(full_url)
+                    
+                    # Check if it's a real listing (has price and area usually)
+                    price_match = price_pattern.search(text)
+                    area_match = area_pattern.search(text)
+                    
+                    # Ignore if "Liên hệ" is the price? No, we might want those. But user asked for prices.
+                    # Price processing
+                    price_txt = price_match.group(0) if price_match else "Liên hệ"
+                    
+                    # Normalize area
+                    area_val = area_match.group(1) if area_match else None
+                    area_normalized = self._normalize_vietnamese_number(area_val) if area_val else None
+
                     # Extract Phone
                     phone_pattern = re.compile(r"(0\d{3}[\s.]?\d{3}[\s.]?\d{3}|0\d{2}[\s.]?\d{3}[\s.]?\d{3})")
                     phone_match = phone_pattern.search(text)
                     phone = phone_match.group(0) if phone_match else "Liên hệ"
+                    
+                    # Location Logic
+                    # If we are on a targeted URL (e.g. /ba-dinh), we trust the intent district logic more
+                    # But verifying text is good
+                    listing_district = None
+                    address_text = "N/A"
+                    
+                    # Batdongsan cards often have a location span
+                    # Try to find location element
+                    loc_elem = item.select_one(".re__card-location, span[class*='location']")
+                    if loc_elem:
+                        address_text = loc_elem.get_text(strip=True)
+                    elif "Hà Nội" in text:
+                         address_text = "Hà Nội"
+                    
+                    # Extract district from address_text
+                    # Extract district from address_text
+                    if address_text != "N/A":
+                         listing_district = extract_district(address_text)
+                         # Debug location extraction
+                         # print(f"   [LOC] '{address_text}' -> '{listing_district}'")
+                    
+                    # FALLBACK REMOVED: Do not force intent.district if extraction failed. 
+                    # This caused "Suggested" items (e.g. Nam Tu Liem) to be labeled as "Dong Da".
+                    
+                    address_full = address_text
+                    if listing_district and intent.district and listing_district.lower() != intent.district.lower():
+                         # If we found a district and it doesn't match intent (while on a valid URL),
+                         # it might be a "Suggested" item.
+                         pass
 
-                    # Normalize area value to handle Vietnamese decimals
-                    area_normalized = self._normalize_vietnamese_number(area_val) if area_val else None
-                    
-                    # Parse price to number
-                    price_number = self._parse_price_to_number(price_match.group(0))
-                    
-                    # Location
-                    district = extract_district(text)
-                    if not district and intent.district:
-                        district = intent.district
-                        
                     location = {
-                        "address": address,
-                        "district": district,
+                        "address": address_text,
+                        "district": listing_district, # STRICT: Only use extracted district
                         "city": intent.city or "Hà Nội"
                     }
                     
+                    # Bedrooms
+                    bedrooms = None
+                    bd_match = bedroom_pattern.search(text)
+                    if bd_match:
+                         try: bedrooms = int(bd_match.group(1))
+                         except: pass
+
+                    # Parse price
+                    price_number = self._parse_price_to_number(price_txt)
+                    
+                    # Title
+                    title = link_tag.get_text(" ", strip=True)
+                    if not title or len(title) < 10:
+                        # Try finding title in h3 or span
+                        h3 = item.find('h3')
+                        if h3: title = h3.get_text(strip=True)
+                    
                     listings.append({
-                        "title": link_tag.get_text(" ", strip=True) or (item.find('h3').get_text(strip=True) if item.find('h3') else "No Title"),
-                        "price_text": price_match.group(0),
+                        "title": title,
+                        "price_text": price_txt,
                         "price_number": price_number,
-                        "area_m2": area_normalized,  # Use normalized value
+                        "area_m2": area_normalized,
+                        "bedrooms": bedrooms,
                         "location": location,
                         "contact": {"phone_clean": phone},
                         "source_url": full_url,
                         "source_platform": "batdongsan"
                     })
                     
-                if len(listings) >= 5: break
-                
-        print(f"   Extracted {len(listings)} listings from Batdongsan")
-        return self._filter_listings_by_intent(listings, intent)
+                    if len(listings) >= 12: break
+                    
+                except Exception as e:
+                    continue
+                    
+            print(f"   Extracted {len(listings)} listings from Batdongsan")
+            return self._filter_listings_by_intent(listings, intent)
+            
+        except Exception as e:
+            logger.error(f"Batdongsan scrape error: {e}")
+            return []
 
     @staticmethod
     def _parse_price_to_number(price_text: str) -> Optional[float]:
@@ -1114,7 +1368,8 @@ CHỈ return JSON array với data THẬT từ page, không fake.
             return None
         
         # Use the normalize function which already handles tỷ/triệu
-        return RealEstateSearchAgent._normalize_vietnamese_number(price_text)
+        val = RealEstateSearchAgent._normalize_vietnamese_number(price_text)
+        return int(val) if val is not None else None
 
     async def _rate_limit_wait(self):
         """Wait if approaching Groq rate limit."""
@@ -1251,45 +1506,58 @@ Trả về JSON array:
             return []
 
     async def _search_batdongsan(self, intent: SearchIntent) -> List[Dict]:
-        """Search Batdongsan.com.vn for listings."""
-
-        # Build URL
-        base_url = "https://batdongsan.com.vn"
-        path = "/ban" if intent.intent == "mua" else "/cho-thue"
-
-        if intent.property_type == "chung cư":
-            path += "-can-ho-chung-cu"
-        elif intent.property_type == "nhà riêng":
-            path += "-nha-rieng"
-        else:
-            path += "-bat-dong-san"
-
-        path += "-ha-noi"
-        search_url = base_url + path
-
-        task = f"""
-Tìm kiếm bất động sản trên Batdongsan.com.vn:
-1. Truy cập: {search_url}
-2. Thu thập 5 listing đầu tiên
-3. Cho mỗi listing: tiêu đề, giá, diện tích, địa chỉ, URL
-
-Trả về JSON array:
-[{{"title": "...", "price_text": "...", "area_text": "...", "location": "...", "url": "..."}}]
-"""
-
+        """Search Batdongsan.com.vn using direct scraping logic."""
+        logger.info(f"🔍 Direct scraping Batdongsan for: {intent.city} - {intent.district}")
+        
+        # Initialize browser agent just for the context (or reuse existing if architecture allows)
+        # But here we need to run the _scrape_batdongsan_direct method which takes (page, intent)
+        # We'll use a temporary Browser-Use agent to get the browser context
+        
         try:
+            task = "Scrape batdongsan" # Dummy task
             agent = Agent(
                 task=task,
                 llm=self.llm,
-                use_vision=settings.browser_use_vision,
-                max_actions_per_step=3,
+                use_vision=False
             )
-
-            result = await agent.run(max_steps=5)
-            return self._parse_agent_result(result)
+            
+            # Custom action to run our direct scraper
+            async def perform_scrape(browser_context):
+                page = await browser_context.get_current_page()
+                return await self._scrape_batdongsan_direct(page, intent)
+            
+            # We can't easily inject this into agent.run(), so we might need to manually handle browser
+            # Or simpler: The SearchAgent class should probably manage the browser itself if we are doing direct scraping.
+            # However, looking at _scrape_chotot_direct usage (it's not used yet? or mixed?)
+            # Let's see how _search_chotot is implemented. it uses self._search_chotot(intent) which calls agent.run()
+            
+            # Wait, `_scrape_batdongsan_direct` expects a playwright `page` object.
+            # To get a page object, we can use the Agent's browser.
+            
+            # Hack: Use a minimal Agent run to get access, OR rewrite to just launch a playwright browser.
+            # Since RealEstateSearchAgent seems to be designed around "Browser Use" library, we should stick to it if possible,
+            # but for direct scraping we want control.
+            
+            # If we utilize the existing 'agent' infrastructure:
+            # The 'search' method (main entry) calls _search_platform.
+            
+            # Let's instantiate a browser explicitly for direct control, it's faster and more reliable for this specific task.
+            from playwright.async_api import async_playwright
+            
+            listings = []
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=settings.headless_mode)
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+                page = await context.new_page()
+                listings = await self._scrape_batdongsan_direct(page, intent)
+                await browser.close()
+                
+            return listings
 
         except Exception as e:
-            logger.error(f"Batdongsan search error: {e}")
+            logger.error(f"Batdongsan direct search error: {e}")
             return []
 
     def _parse_agent_result(self, result: Any) -> List[Dict]:

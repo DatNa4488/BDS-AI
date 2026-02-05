@@ -137,19 +137,21 @@ class VectorDB:
             district = ""
             city = "Hà Nội"
 
-        return {
+        m = {
             "listing_id": listing.get("id", ""),
             "title": listing.get("title", "")[:200],
             "property_type": listing.get("property_type", ""),
             "district": district,
             "city": city,
-            "price_number": listing.get("price_number") or 0,
-            "area_m2": listing.get("area_m2") or 0,
-            "bedrooms": listing.get("bedrooms") or 0,
+            "price_number": int(listing.get("price_number") or 0),
+            "area_m2": float(listing.get("area_m2") or 0.0),
+            "bedrooms": int(listing.get("bedrooms") or 0),
             "source_platform": listing.get("source_platform", ""),
             "source_url": listing.get("source_url", "")[:500],
             "scraped_at": listing.get("scraped_at", datetime.utcnow().isoformat()),
         }
+        print(f"DEBUG METADATA INTERNAL: {m}")
+        return m
 
     async def add_listing(self, listing: dict) -> str:
         """
@@ -167,6 +169,8 @@ class VectorDB:
 
         document = self._create_document(listing)
         metadata = self._create_metadata(listing)
+        print(f"DEBUG METADATA: {metadata}") 
+
 
         self._collection.upsert(
             ids=[doc_id],

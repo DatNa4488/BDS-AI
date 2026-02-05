@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     browser_use_vision: bool = False
 
     # Google-First Search Settings
-    google_search_enabled: bool = True
+    google_search_enabled: bool = False # Disabled to prevent hallucinations (Amazon)
     max_urls_per_search: int = 8
     max_steps_google_search: int = 6
     max_steps_per_url: int = 4
@@ -174,6 +174,8 @@ DISTRICT_PRICE_RANGES = {
     "Ứng Hòa": (10, 35),
     "Mỹ Đức": (10, 30),
     "Ba Vì": (8, 25),
+    "Sơn Tây": (15, 50),
+    "Phúc Thọ": (15, 50),
 }
 
 # Property type mappings
