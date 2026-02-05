@@ -149,22 +149,35 @@ Trả về JSON format:
             
             # Fallback for price fields if missing from LLM response
             if "price_suggested" not in result or not result["price_suggested"]:
-                result["price_suggested"] = ml_price or 0
+                result["price_suggested"] = int(ml_price or 0)
+            else:
+                result["price_suggested"] = int(result["price_suggested"])
                 
             if "price_min" not in result or not result["price_min"]:
-                result["price_min"] = (ml_price * 0.9) if ml_price else 0
+                result["price_min"] = int(ml_price * 0.9) if ml_price else 0
+            else:
+                result["price_min"] = int(result["price_min"])
                 
             if "price_max" not in result or not result["price_max"]:
-                result["price_max"] = (ml_price * 1.1) if ml_price else 0
+                result["price_max"] = int(ml_price * 1.1) if ml_price else 0
+            else:
+                result["price_max"] = int(result["price_max"])
                 
             if "price_per_m2" not in result or not result["price_per_m2"]:
                 if ml_price and area_m2:
-                    result["price_per_m2"] = ml_price / area_m2
+                    result["price_per_m2"] = int(ml_price / area_m2)
                 else:
                     result["price_per_m2"] = 0
+            else:
+                result["price_per_m2"] = int(result["price_per_m2"])
             
             if "confidence" not in result:
                 result["confidence"] = 70 if ml_price else 30
+            else:
+                try:
+                    result["confidence"] = int(result["confidence"])
+                except (ValueError, TypeError):
+                    result["confidence"] = 70 if ml_price else 30
                 
             result["timestamp"] = datetime.now().isoformat()
             result["market_samples"] = len(market_data)

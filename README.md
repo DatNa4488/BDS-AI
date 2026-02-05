@@ -4,9 +4,9 @@ Hệ thống AI chuyên nghiệp tự động thu thập (scrape), phân tích v
 
 ---
 
-## �️ Kiến Trúc Hệ Thống (System Architecture)
+## 🏛️ Kiến Trúc Hệ Thống (System Architecture)
 
-Hệ thống được xây dựng theo kiến trúc Micro-services đơn giản (Modular Monolith) với sự kết hợp giữa xử lý ngôn ngữ tự nhiên (LLM) và học máy truyền thống (ML).
+Dự án được thiết kế theo hướng **Modular Monolith**, đảm bảo tính tách biệt giữa các service nhưng vẫn dễ dàng triển khai.
 
 ### 1. Sơ đồ luồng dữ liệu (Data Flow)
 
@@ -15,7 +15,7 @@ graph TD
     User((Người dùng)) -->|Yêu cầu| UI[Frontend Next.js]
     UI -->|API v1| API[FastAPI Backend]
     
-    subgraph "AI & Processing Layer"
+    subgraph "AI Processing Layer"
         API -->|Search Query| SA[Search Agent]
         API -->|Valuation Req| VS[Valuation Service]
         SA -->|Scrape| BW[Browser-use / Playwright]
@@ -23,48 +23,61 @@ graph TD
         VS -->|Analyze| LS[LLM Service]
     end
     
-    subgraph "Storage Layer"
-        ML -->|Dữ liệu huấn luyện| DB[(PostgreSQL)]
-        SA -->|Lưu tin đăng| DB
-        SA -->|Vector Embeddings| VDB[(ChromaDB)]
-    end
-    
-    subgraph "Hybrid LLM Logic"
-        LS -->|Ưu tiên| Gemini[Google Gemini 2.0]
-        Gemini -.->|Lỗi/Hết Quota| Ollama[Local Ollama - Qwen 2.5]
+    subgraph "Automated Workflow"
+        SA -.->|Tự động đồng bộ| VDB[(Vector DB)]
+        SA -.->|Lưu trữ| DB[(PostgreSQL)]
+        ML -.->|Lấy dữ liệu| DB
+        Scheduler[Celery/Scheduler] -.->|Kích hoạt cào| SA
     end
 ```
 
-### 2. Các thành phần chính
+### 2. Chi tiết các Module
 
-- **Search Agent**: Sử dụng `browser-use` để điều khiển trình duyệt như người thật, tự động vượt qua các lớp bảo mật để thu thập dữ liệu bất động sản từ Batdongsan, Chợ Tốt.
-- **LLM Service (Resilient Layer)**: Đóng vai trò bộ não. Sử dụng cơ chế Fallback độc đáo. Nếu API đám mây (Gemini) gặp sự cố, hệ thống tự động gọi Ollama chạy ngay trên máy của bạn để xử lý chat và phân tích JSON.
-- **ML Service (Valuation)**: Sử dụng **AutoGluon** để huấn luyện mô hình dự báo giá dựa trên dữ liệu thực tế đã cào được. Đây là con số tham chiếu khách quan bên cạnh phân tích của LLM.
-- **Vector Database (ChromaDB)**: Chuyển đổi thông tin tin đăng thành các vector không gian, cho phép tìm kiếm theo ngữ nghĩa (Semantic Search) thay vì chỉ tìm theo từ khóa.
+#### 🤖 AI Scraper Agent (`agents/`)
+- **Web Intelligence**: Sử dụng `browser-use` tích hợp LLM để "đọc" và "hiểu" cấu trúc trang web bất động sản (Batdongsan.com.vn, Chotot).
+- **Vượt rào cản**: Cơ chế tự động xử lý Captcha và thay đổi User-Agent để tránh bị block.
+- **Data Cleaner**: Tự động chuyển đổi các đơn vị giá (tỷ, triệu/m2, thỏa thuận) về số nguyên chuẩn để tính toán.
 
----
+#### 📈 Machine Learning Service (`services/ml_service.py`)
+- **AutoGluon Backbone**: Sử dụng framework AutoML của Amazon để tự động chọn ra model tốt nhất (XGBoost, LightGBM, CatBoost).
+- **Online Training**: Hệ thống có khả năng tự động train lại model (Retraining) khi lượng dữ liệu mới trong Database đạt ngưỡng nhất định.
+- **Feature Engineering**: Tự động xử lý các đặc trưng như: Quận/Huyện, Loại nhà, Hướng, Số phòng để đưa ra dự báo chính xác nhất.
 
-## 🌟 Tính Năng Nổi Bật
+#### 🧠 LLM Service & Resilient Logic (`services/llm_service.py`)
+- **Hybrid AI**: 
+    - **Primary**: Google Gemini 2.0 Flash (Tốc độ cao, suy luận tốt).
+    - **Fallback**: Ollama (Qwen 2.5 1.5B) - Hoạt động ngay cả khi không có mạng hoặc hết quota API.
+- **JSON Enforcement**: Đảm bảo AI luôn trả về cấu trúc dữ liệu chuẩn dù đang ở chế độ dự phòng.
 
-- **Hybrid AI Fallback**: Đảm bảo hệ thống không bao giờ "chết" khi mất internet hoặc hết tiền API.
-- **AutoML Integration**: Tự động huấn luyện lại mô hình định giá hàng ngày khi có dữ liệu mới.
-- **Semantic Search**: Tìm kiếm thông minh: "Mua nhà cho người thích yên tĩnh, gần hồ" thay vì chỉ "mua nhà Tây Hồ".
-- **Professional UI**: Giao diện tối ưu cho trải nghiệm người dùng với tone màu Slate hiện đại, dịu mắt.
-
----
-
-## 📂 Cấu Trúc Thư Mục
-
-- `/api`: Chứa các routes FastAPI, logic xử lý API v1.
-- `/agents`: Các Agent thông minh xử lý cào dữ liệu và tìm kiếm.
-- `/services`: Chứa logic nghiệp vụ chính (LLM, ML, Valuation).
-- `/storage`: Cấu hình Database (PostgreSQL) và Vector DB (ChromaDB).
-- `/frontend`: Mã nguồn giao diện Next.js 14+ với TailwindCSS và ShadcnUI.
-- `/scheduler`: Các tác vụ chạy ngầm (tự động cào dữ liệu, tự động huấn luyện lại model).
+#### 💾 Database & Vector Search
+- **PostgreSQL**: Lưu trữ dữ liệu quan hệ, lịch sử định giá và thông tin tin đăng.
+- **ChromaDB**: Lưu trữ các bản nhúng (Embeddings) của tin đăng, cho phép tìm kiếm theo ý nghĩa: *"Tìm nhà giống căn ở Cầu Giấy nhưng giá rẻ hơn"*.
 
 ---
 
-## 📋 Yêu Cầu Hệ Thống
+## � Hướng Dẫn Phát Triển (Developer Guide)
+
+### Cách thêm một trang cào dữ liệu mới:
+1. Tạo một class kế thừa từ `BaseCrawler` trong `agents/`.
+2. Định nghĩa logic trích xuất thông tin (Title, Price, Area).
+3. Đăng ký crawler trong `SearchAgent`.
+
+### Cách chạy thử nghiệm các tính năng:
+- **Test Scraper**: `python debug_scraper.py`
+- **Test ML Connection**: `python debug_analytics_data.py`
+
+---
+
+## 🎨 Giao Diện Hệ Thống (UI Design)
+
+Hệ thống sử dụng ngôn ngữ thiết kế **Space AI**:
+- **Background**: Deep Space Blue với hiệu ứng Radial Glow (Spotlight).
+- **Typography**: Kết hợp phông chữ Inter và hệ thống icon Lucide chuyên nghiệp.
+- **Responsive**: Tương thích hoàn toàn với Mobile và Tablet.
+
+---
+
+## 📋 Yêu Cầu Cài Đặt
 
 1.  **Python 3.11+**
 2.  **Node.js 18+** (Frontend Next.js)
